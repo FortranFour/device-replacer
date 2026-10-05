@@ -2,13 +2,18 @@
 
 # Device Replacer
 
-A Home Assistant custom integration for replacing a device's configuration references with those of another device. Select the old and new devices, confirm the mapping between their entities, inspect the preview, and apply selected changes with backups. Single-entity mode is also available. Working, unavailable and disabled source devices/entities are included; removed sources can be entered explicitly.
+This Home Assistant custom integration addresses the problem when a device fails and its entities are used across a Home Assistant installation, including in dashboards, automations, scripts, etc. It automates substitution of the replacement device's entities in user configurable files.
+
+Select the old and new devices, confirm the mapping between their entities, inspect the preview, and apply selected changes with backups. Single-entity mode is also available. Working, unavailable and disabled source devices/entities are included; removed sources can be entered explicitly.
 
 The integration updates literal references in YAML and saved UI dashboards. Compatible YAML device automation blocks can change both device and entity selectors after capability validation. Other settings get a report with file paths and line numbers for manual follow-up. Add/pair the replacement hardware through its normal integration first.
 
 It adds a **Device Replacer** page to the administrator sidebar. There is no dashboard card, frontend resource entry, or `configuration.yaml` setup. The internal domain, installation directory and panel URL remain `entity_replacer` and `/entity-replacer` so existing Entity Replacer installs upgrade in place.
 
 Maintained by [FortranFour](https://github.com/FortranFour). Current release: **1.1.2**. Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
+
+<img width="1352" height="1151" alt="Screenshot 2026-10-05 104154" src="https://github.com/user-attachments/assets/89a87a1b-38c2-409e-babf-6179e8c9e9a3" />
+
 
 ## Before you begin
 
