@@ -1,0 +1,12 @@
+{
+  "title": "Device Replacer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Device Replacer",
+        "description": "Adds an administrator-only sidebar tool to map replacement devices and entities, review reference changes, and apply changes with backups. Open Device Replacer in the sidebar after setup. No configuration.yaml changes or dashboard resources are required."
+      }
+    },
+    "abort": {"already_configured": "Device Replacer is already configured."}
+  }
+}

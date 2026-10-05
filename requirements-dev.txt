@@ -1,0 +1,2 @@
+# Home Assistant supplies PyYAML at runtime; this is for standalone tests.
+PyYAML>=6.0.2,<7

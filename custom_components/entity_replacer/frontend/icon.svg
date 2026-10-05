@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Device Replacer — connection handoff</title>
+  <g fill="none" stroke="#00BFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="24" y="24" width="80" height="80" rx="16" stroke-dasharray="12 13"/>
+    <path d="M64 122v30q0 32 32 32h36"/>
+    <path d="m114 166 18 18-18 18"/>
+    <rect x="152" y="144" width="80" height="80" rx="16"/>
+  </g>
+</svg>
