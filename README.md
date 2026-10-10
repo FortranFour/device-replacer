@@ -10,7 +10,7 @@ The integration updates literal references in YAML and saved UI dashboards. Comp
 
 It adds a **Device Replacer** page to the administrator sidebar. There is no dashboard card, frontend resource entry, or `configuration.yaml` setup. The internal domain, installation directory and panel URL remain `entity_replacer` and `/entity-replacer` so existing Entity Replacer installs upgrade in place.
 
-Maintained by [FortranFour](https://github.com/FortranFour). Current release: **1.1.2**. Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
+Maintained by [FortranFour](https://github.com/FortranFour). Current release: **1.1.3**. Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
 
 <img width="1352" height="1151" alt="Screenshot 2026-10-05 104154" src="https://github.com/user-attachments/assets/89a87a1b-38c2-409e-babf-6179e8c9e9a3" />
 
@@ -36,11 +36,11 @@ Download through HACS and restart Home Assistant. **Device Replacer replaces the
 
 ### Manual installation
 
-1. Download `device_replacer_1.1.2.zip` from [GitHub Releases](https://github.com/FortranFour/device-replacer/releases) and upload it to `/config` using your usual file editor or Samba share.
+1. Download `device_replacer_1.1.3.zip` from [GitHub Releases](https://github.com/FortranFour/device-replacer/releases) and upload it to `/config` using your usual file editor or Samba share.
 2. In the Home Assistant Terminal/SSH add-on, extract the integration:
 
    ```bash
-   unzip -o /config/device_replacer_1.1.2.zip 'custom_components/entity_replacer/*' -d /config
+   unzip -o /config/device_replacer_1.1.3.zip 'custom_components/entity_replacer/*' -d /config
    ```
 
    The final path must be `/config/custom_components/entity_replacer/manifest.json`. Do not put an extra `entity_replacer` directory between `custom_components` and the integration files.
@@ -55,7 +55,7 @@ Download through HACS and restart Home Assistant. **Device Replacer replaces the
 5. You can delete the installation ZIP after extraction:
 
    ```bash
-   rm -f /config/device_replacer_1.1.2.zip
+   rm -f /config/device_replacer_1.1.3.zip
    ```
 
 The final path must be `/config/custom_components/entity_replacer/manifest.json`, with `brand/` and `frontend/` alongside it. All runtime files are inside that integration directory.

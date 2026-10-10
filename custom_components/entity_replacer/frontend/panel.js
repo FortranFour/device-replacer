@@ -1,4 +1,4 @@
-/* Device Replacer 1.1.2. No external frontend libraries or build step. */
+/* Device Replacer 1.1.3. No external frontend libraries or build step. */
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
@@ -42,6 +42,8 @@ class EntityReplacerPanel extends HTMLElement {
     }
   }
   get hass() { return this._hass; }
+  set narrow(value) { this.toggleAttribute("narrow", Boolean(value)); }
+  get narrow() { return this.hasAttribute("narrow"); }
   connectedCallback() {
     if (!this._started && this._hass?.callWS) {
       this._started = true;
@@ -329,7 +331,8 @@ class EntityReplacerPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>
       :host { display:block; height:100%; color:var(--primary-text-color,#202a35); background:var(--primary-background-color,#f4f6f8); font:14px/1.5 var(--paper-font-body1_-_font-family,Arial,sans-serif); overflow:auto; }
       * { box-sizing:border-box; } header { display:flex; align-items:center; gap:16px; padding:14px 20px; border-bottom:1px solid var(--divider-color,#dce1e7); background:var(--card-background-color,#fff); position:sticky; top:0; z-index:2; }
-      header strong { font-size:20px; } .brand-icon { width:32px; height:32px; flex-shrink:0; } .menu { border:0; padding:5px 10px; font-size:22px; background:transparent; color:inherit; } .version { margin-left:auto; color:var(--secondary-text-color,#657180); }
+      header strong { font-size:20px; } .brand-icon { width:32px; height:32px; flex-shrink:0; } .menu { display:none; border:0; padding:5px 10px; font-size:22px; background:transparent; color:inherit; } .version { margin-left:auto; color:var(--secondary-text-color,#657180); }
+      :host([narrow]) .menu { display:inline-flex; align-items:center; justify-content:center; }
       main { max-width:1080px; margin:0 auto; padding:20px; } h1 { font-size:21px; margin:0 0 8px; } h2 { font-size:18px; margin:0 0 10px; } p { margin:6px 0; } code { overflow-wrap:anywhere; }
       .card { background:var(--card-background-color,#fff); border:1px solid var(--divider-color,#dce1e7); border-radius:14px; padding:20px; margin:16px 0; }
       .bubble { padding:16px 20px; border-radius:18px; background:var(--entity-replacer-summary-background,rgba(3,169,244,.13)); border:1px solid rgba(3,169,244,.24); margin:0 0 16px; } .bubble strong { display:block; font-size:17px; }
@@ -344,7 +347,7 @@ class EntityReplacerPanel extends HTMLElement {
       .reference { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--divider-color,#e4e8ec); } .reference-body { min-width:0; flex:1; } .manual { display:block; padding:2px 6px; border-radius:5px; font-size:12px; background:rgba(255,170,0,.18); } pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 monospace; background:var(--secondary-background-color,#f4f6f8); border-radius:7px; padding:10px; }
       .diff { border-top:1px solid var(--divider-color,#dce1e7); } .diff pre { max-height:520px; overflow:auto; white-space:pre; } .coverage { margin:20px 0; } li { margin:6px 0; } .empty { padding:20px; } .progress { color:var(--primary-color,#0288d1); margin:12px 0; } .backup-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .backup-row select { flex:1; min-width:230px; } .restore-check { margin-top:16px; }
       @media(max-width:640px) { main { padding:12px; } .fields,.mapping-row { grid-template-columns:1fr; gap:14px; } .card { padding:15px; } header { padding:12px; } .reference { gap:8px; } button { min-height:44px; } .backup-row select { min-width:0; flex-basis:100%; } }
-    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.1.2")}</span></header><main>
+    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.1.3")}</span></header><main>
       <section class="bubble"><strong>Replace a device and its entity references</strong><p>Choose the old and new devices, confirm their entity roles, then review and apply selected changes with backups. Single-entity replacement is also available.</p></section>
       ${this._error ? `<div class="error" role="alert">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHtml(this._notice)}</div>` : ""}
       <section class="card"><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}

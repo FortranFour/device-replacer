@@ -18,7 +18,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
         window.calls = [];
         window.restored = false;
         const status = {
-          version: "1.1.2",
+          version: "1.1.3",
           devices: [{ id: "a".repeat(32), name: "Old plug", manufacturer: "Example", model: "Meter", entities: 1 }, { id: "b".repeat(32), name: "New plug", manufacturer: "Example", model: "Meter", entities: 1 }],
           entities: [
             { entity_id: "sensor.old", name: "Old power sensor", state: "unavailable" },

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 — 2026-10-10
+
+- Hide the panel header sidebar toggle in desktop/wide mode.
+- Keep the toggle available in Home Assistant’s mobile/narrow mode, including changes when resizing.
+- Preserve the same sidebar toggle action and device/entity replacement behavior.
+
 ## 1.1.2 — 2026-10-05
 
 - Package the device-first 1.1.1 workflow for public installation through a HACS custom repository.
