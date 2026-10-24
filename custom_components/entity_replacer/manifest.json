@@ -1,6 +1,9 @@
 {
   "domain": "entity_replacer",
   "name": "Device Replacer",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@FortranFour"
   ],
@@ -19,8 +22,5 @@
   "issue_tracker": "https://github.com/FortranFour/device-replacer/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.2.0",
-  "after_dependencies": [
-    "recorder"
-  ]
+  "version": "1.2.0"
 }
