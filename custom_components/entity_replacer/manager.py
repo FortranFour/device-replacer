@@ -22,6 +22,7 @@ except ImportError:
 from .const import PREVIEW_TTL, VERSION
 from .device import DeviceBlock
 from .device_manager import DeviceWorkflow
+from .statistics import StatisticsWorkflow
 from .engine import (
     BackupStore, Document, MAX_FILE_BYTES, ReplacementError, build_candidate,
     digest, json_bytes, read_file, render_report, replace_file, scan_dashboard,
@@ -49,7 +50,7 @@ class Preview:
     device_blocks: list[DeviceBlock] = field(default_factory=list)
 
 
-class EntityReplacer(DeviceWorkflow):
+class EntityReplacer(DeviceWorkflow, StatisticsWorkflow):
     """All mutations are serialized; external editors are guarded by hashes."""
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -57,6 +58,7 @@ class EntityReplacer(DeviceWorkflow):
         self.root = Path(hass.config.config_dir)
         self.backups = BackupStore(self.root)
         self.previews: dict[str, Preview] = {}
+        self.statistics_previews: dict[str, dict] = {}
         self.lock = asyncio.Lock()
 
     async def _io(self, function, *args):
@@ -212,7 +214,7 @@ class EntityReplacer(DeviceWorkflow):
                 "Other active storage and additional text/code files are manual-review only when their scan options are enabled. Known binary storage formats are skipped quietly.",
                 "Secrets, entity/device identity registries, history caches, vendor code, backups, symlinks, external add-ons, and files outside the configuration directory are excluded.",
                 "Computed/concatenated IDs, area/label selections, blueprint device inputs, and unsupported device blocks need manual follow-up.",
-                "Device pairing, unique IDs, entity/device registries, areas/labels, and historical statistics are not transferred.",
+                "Device pairing, unique IDs, entity/device registries, areas/labels, and historical statistics are not transferred by reference replacement; eligible measurement statistics have a separate transfer action.",
             ],
         }
         result["report"] = await self._io(render_report, result)
@@ -386,6 +388,8 @@ class EntityReplacer(DeviceWorkflow):
     async def restore(self, job_id: str) -> dict:
         async with self.lock:
             manifest = await self._io(self.backups.load, job_id)
+            if manifest.get("mode") == "statistics":
+                raise ReplacementError("Statistics audit records are not configuration backups. Database recovery requires your database-inclusive backup; this Restore action cannot undo statistics transfers.")
             candidates = []
             for record in manifest["items"]:
                 before = await self._io(self.backups.payload, manifest, record, "before")

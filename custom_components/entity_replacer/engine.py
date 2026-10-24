@@ -709,12 +709,35 @@ class BackupStore:
                 continue
             try:
                 manifest = self.load(directory.name)
-                result.append({key: manifest[key] for key in ("job_id", "created", "source", "target", "status")})
+                result.append({**{key: manifest[key] for key in ("job_id", "created", "source", "target", "status")}, "mode": manifest.get("mode", "entity")})
             except (OSError, ValueError, KeyError, ReplacementError):
                 continue
             if len(result) >= 30:
                 break
         return result
+
+    def statistics_conflicts(self, source: str, target: str) -> list[str]:
+        """Find unresolved recorder operations, including across HA restarts.
+
+        Unlike the UI history this scan is not capped at 30 records. Refuse a
+        damaged manifest rather than overlooking an unknown pending operation.
+        """
+        base = safe_path(self.root, BACKUP_DIR)
+        if not base.exists():
+            return []
+        conflicts = []
+        for directory in base.iterdir():
+            if not JOB_ID.fullmatch(directory.name):
+                continue
+            try:
+                manifest = self.load(directory.name)
+            except (OSError, ValueError, KeyError, ReplacementError) as err:
+                raise ReplacementError(f"Cannot verify audit record {directory.name}; inspect it before transferring statistics.") from err
+            if (manifest.get("mode") == "statistics"
+                    and manifest.get("status") in {"statistics_applying", "statistics_outcome_unknown"}
+                    and {source, target} & {manifest["source"], manifest["target"]}):
+                conflicts.append(manifest["job_id"])
+        return conflicts
 
 
 def render_report(preview: dict) -> str:
@@ -728,7 +751,7 @@ def render_report(preview: dict) -> str:
         lines += ["## Confirmed entity mappings", "", "| Source entity | Replacement entity | Old registry ID | New registry ID |", "| --- | --- | --- | --- |"]
         for row in preview.get("mappings", []):
             lines.append(f"| `{row['source']}` | {('`' + row['target'] + '`') if row['target'] else 'Unmapped; unchanged'} | {row.get('source_registry_id') or 'Unknown'} | {row.get('target_registry_id') or 'None'} |")
-        lines += ["", "Device automation selector groups must be selected together. Unsupported blocks must be rebuilt in their owning editor.", "Pairing, unique IDs, areas/labels and historical statistics are not transferred.", ""]
+        lines += ["", "Device automation selector groups must be selected together. Unsupported blocks must be rebuilt in their owning editor.", "Pairing, unique IDs, areas/labels and historical statistics are not transferred by reference replacement; eligible measurement statistics have a separate transfer action.", ""]
     for warning in preview["warnings"]:
         lines += ["- " + warning]
     for document in preview["documents"]:

@@ -1,4 +1,4 @@
-/* Device Replacer 1.1.3. No external frontend libraries or build step. */
+/* Device Replacer 1.2.0. No external frontend libraries or build step. */
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
@@ -30,6 +30,7 @@ class EntityReplacerPanel extends HTMLElement {
     this._notice = "";
     this._preview = null;
     this._review = null;
+    this._statisticsPreview = null;
     this._started = false;
     this._render();
   }
@@ -96,6 +97,9 @@ class EntityReplacerPanel extends HTMLElement {
   }
 
   _invalidate() {
+    this._statisticsPreview = null;
+    const statistics = this._query("#statistics-section");
+    if (statistics) { statistics.innerHTML = this._renderStatistics(); this._bindStatistics(); }
     this._preview = null;
     this._review = null;
     this._selected.clear();
@@ -242,6 +246,59 @@ class EntityReplacerPanel extends HTMLElement {
     });
   }
 
+  _statisticsPairs() {
+    return this._mode === "device"
+      ? (this._mappingConfirmed ? this._mappings.filter((row) => row.source.startsWith("sensor.") && row.target) : [])
+      : (this._source.trim() && this._target.trim() ? [{ source: this._source.trim(), target: this._target.trim() }] : []);
+  }
+
+  async _previewStatistics(index) {
+    const pair = this._statisticsPairs()[index];
+    if (!pair) return;
+    this._statisticsPreview = null;
+    await this._run("Checking stored statistics and disabled sensors…", async () => {
+      this._statisticsPreview = await this._request("statistics_preview", { source: pair.source.trim(), target: pair.target.trim() });
+    });
+  }
+
+  async _applyStatistics() {
+    if (!this._statisticsPreview?.eligible || !this._query("#statistics-confirm")?.checked) return;
+    const previewId = this._statisticsPreview.preview_id;
+    await this._run("Transferring statistics through recorder and verifying the result…", async () => {
+      let result;
+      try {
+        result = await this._request("statistics_apply", { preview_id: previewId, confirmed: true });
+      } finally {
+        // A timeout can leave recorder work queued. Never keep a retry button.
+        this._statisticsPreview = null;
+      }
+      this._notice = `${result.message} Audit: ${result.job_id}`;
+      await this._refreshHistory();
+    });
+  }
+
+  _statisticsTime(timestamp) {
+    return timestamp == null ? "none" : new Date(timestamp * 1000).toLocaleString();
+  }
+
+  async _verifyStatistics(jobId) {
+    await this._run("Checking recorder metadata without retrying the transfer…", async () => {
+      const result = await this._request("statistics_verify", { job_id: jobId });
+      this._notice = result.message;
+      await this._refreshHistory();
+    });
+  }
+
+  _renderStatistics() {
+    const pairs = this._statisticsPairs();
+    const preview = this._statisticsPreview;
+    const audit = (this._history || []).filter((item) => item.mode === "statistics");
+    return `<section class="card"><h2>Transfer historical statistics (limited preview)</h2><p>Separate from reference replacement. Supports arithmetic measurement sensors with identical units; existing replacement statistics and cumulative counters are blocked.</p><p>Keep both sensors registered, disable them in Settings → Devices &amp; services → Entities, and wait until unloaded. The old sensor must remain disabled afterward. No measurements or raw state history are copied.</p>
+      ${pairs.length ? pairs.map((pair, index) => `<div class="actions"><code>${escapeHtml(pair.source)} → ${escapeHtml(pair.target)}</code><button data-statistics-preview="${index}" ${this._busy ? "disabled" : ""}>Check statistics</button></div>`).join("") : '<p class="secondary">Choose a sensor pair above, or confirm the device entity mappings.</p>'}
+      ${preview ? `<div class="${preview.eligible ? "bubble" : "warning"}"><strong>${escapeHtml(preview.source)} → ${escapeHtml(preview.target)}</strong>${preview.eligible ? `<p>${escapeHtml(preview.device_class)} · ${escapeHtml(preview.unit)}. The destination has no stored statistics metadata.</p><p>Latest retained periods: hourly ${escapeHtml(this._statisticsTime(preview.latest.hourly[0]?.start))}; five-minute ${escapeHtml(this._statisticsTime(preview.latest.five_minute[0]?.start))}.</p><p>The existing series will be renamed. Configuration and Energy settings stay unchanged. Configuration Restore cannot undo this operation.</p><label class="check"><input id="statistics-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> I reviewed this pair, confirm they measure the same quantity, and have a current database-inclusive backup for recovery.</label><button id="statistics-apply" class="primary" disabled>Transfer reviewed statistics</button>` : `<p>${escapeHtml(preview.reason)}</p>`}</div>` : ""}
+      ${audit.length ? `<details><summary>Statistics transfer audit</summary>${audit.map((item) => `<p><code>${escapeHtml(item.job_id)}</code> · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)} ${["statistics_applying", "statistics_outcome_unknown"].includes(item.status) ? `<button data-statistics-verify="${escapeHtml(item.job_id)}" ${this._busy ? "disabled" : ""}>Check outcome</button>` : ""}</p>`).join("")}<p>Audit records contain no database backup. An unverified outcome blocks further transfers involving those sensors until the audit/database is reconciled.</p></details>` : ""}</section>`;
+  }
+
   async _restore() {
     const jobId = this._query("#backup").value;
     if (!jobId) return;
@@ -347,14 +404,14 @@ class EntityReplacerPanel extends HTMLElement {
       .reference { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--divider-color,#e4e8ec); } .reference-body { min-width:0; flex:1; } .manual { display:block; padding:2px 6px; border-radius:5px; font-size:12px; background:rgba(255,170,0,.18); } pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 monospace; background:var(--secondary-background-color,#f4f6f8); border-radius:7px; padding:10px; }
       .diff { border-top:1px solid var(--divider-color,#dce1e7); } .diff pre { max-height:520px; overflow:auto; white-space:pre; } .coverage { margin:20px 0; } li { margin:6px 0; } .empty { padding:20px; } .progress { color:var(--primary-color,#0288d1); margin:12px 0; } .backup-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .backup-row select { flex:1; min-width:230px; } .restore-check { margin-top:16px; }
       @media(max-width:640px) { main { padding:12px; } .fields,.mapping-row { grid-template-columns:1fr; gap:14px; } .card { padding:15px; } header { padding:12px; } .reference { gap:8px; } button { min-height:44px; } .backup-row select { min-width:0; flex-basis:100%; } }
-    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.1.3")}</span></header><main>
+    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.0")}</span></header><main>
       <section class="bubble"><strong>Replace a device and its entity references</strong><p>Choose the old and new devices, confirm their entity roles, then review and apply selected changes with backups. Single-entity replacement is also available.</p></section>
       ${this._error ? `<div class="error" role="alert">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHtml(this._notice)}</div>` : ""}
       <section class="card"><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}
       <details><summary>Additional scan options</summary><label class="check"><input id="text" type="checkbox" ${this._text ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in additional text/code files</label><label class="check"><input id="storage" type="checkbox" ${this._storage ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in other internal storage (manual review)</label><label class="check"><input id="allow-unavailable" type="checkbox" ${this._allowUnavailable ? "checked" : ""} ${this._busy ? "disabled" : ""}> Allow unavailable or disabled replacements</label></details>
       <div class="actions"><button id="scan" class="primary">Scan references</button><button id="refresh" ${this._busy ? "disabled" : ""}>Refresh device/entity lists</button></div><p class="secondary">YAML formatting and comments are preserved. UI dashboards are saved through Home Assistant. Device blocks are selectable only when their selectors and replacement capabilities can be validated. Unsupported blocks and other storage get manual instructions.</p></section>
-      ${this._busy ? `<p class="progress" role="status" aria-live="polite">${escapeHtml(this._busyMessage)}</p>` : ""}<div id="results">${this._renderResults()}</div>
-      <section class="card"><h2>Restore a replacement</h2><p class="secondary">Restore checks every file/dashboard first and refuses to overwrite newer edits. Backups survive Home Assistant restarts.</p>${this._history.length ? `<div class="backup-row"><select id="backup" aria-label="Choose replacement backup" ${this._busy ? "disabled" : ""}>${this._history.map((item) => `<option value="${escapeHtml(item.job_id)}">${escapeHtml(item.created)} · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)}</option>`).join("")}</select><button id="restore" ${this._busy ? "disabled" : ""}>Restore selected backup</button></div><label class="check restore-check"><input id="restore-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> Restore the files/dashboard settings changed by this replacement</label>` : '<p>No replacements have been applied yet.</p>'}</section>
+      ${this._busy ? `<p class="progress" role="status" aria-live="polite">${escapeHtml(this._busyMessage)}</p>` : ""}<div id="results">${this._renderResults()}</div><div id="statistics-section">${this._renderStatistics()}</div>
+      <section class="card"><h2>Restore a replacement</h2><p class="secondary">Restore checks every file/dashboard first and refuses to overwrite newer edits. Backups survive Home Assistant restarts.</p>${this._history.some((item) => item.mode !== "statistics") ? `<div class="backup-row"><select id="backup" aria-label="Choose replacement backup" ${this._busy ? "disabled" : ""}>${this._history.filter((item) => item.mode !== "statistics").map((item) => `<option value="${escapeHtml(item.job_id)}">${escapeHtml(item.created)} · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)}</option>`).join("")}</select><button id="restore" ${this._busy ? "disabled" : ""}>Restore selected backup</button></div><label class="check restore-check"><input id="restore-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> Restore the files/dashboard settings changed by this replacement</label>` : '<p>No replacements have been applied yet.</p>'}</section>
     </main>`;
     this._bind();
     this._updateControls();
@@ -456,6 +513,21 @@ class EntityReplacerPanel extends HTMLElement {
       restore.disabled = true;
     });
     on("#restore", "click", () => this._restore());
+    this._bindStatistics();
+  }
+
+  _bindStatistics() {
+    const on = (selector, event, handler) => this._query(selector)?.addEventListener(event, handler);
+    for (const button of this.shadowRoot.querySelectorAll("[data-statistics-preview]")) {
+      button.addEventListener("click", () => this._previewStatistics(Number(button.dataset.statisticsPreview)));
+    }
+    on("#statistics-confirm", "change", (event) => {
+      this._query("#statistics-apply").disabled = this._busy || !event.target.checked;
+    });
+    on("#statistics-apply", "click", () => this._applyStatistics());
+    for (const button of this.shadowRoot.querySelectorAll("[data-statistics-verify]")) {
+      button.addEventListener("click", () => this._verifyStatistics(button.dataset.statisticsVerify));
+    }
   }
 
   _updateFileChecks() {

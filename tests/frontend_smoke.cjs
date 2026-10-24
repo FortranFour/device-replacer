@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE, args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] });
   try {
     for (const viewport of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }]) {
     for (const mode of ["device", "entity"]) {
@@ -73,6 +73,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
             case "entity_replacer/apply":
               status.history = [{ job_id: "20261002T170000Z-abcdef123456", created: "2026-10-02T17:00:00+00:00", source: "sensor.old", target: "sensor.new", status: "applied" }];
               return { references_changed: message.selected_ids.length, documents_changed: message.selected_ids.length, message: "Changes saved. Check configuration, then restart Home Assistant.", backup_path: "/config/.entity_replacer_backups/demo" };
+            case "entity_replacer/statistics_preview": return {
+              eligible: true, preview_id: "statistics-demo", source: message.source, target: message.target,
+              device_class: "temperature", unit: "°C", latest: { hourly: [{ start: 1700000000 }], five_minute: [] },
+            };
+            case "entity_replacer/statistics_apply":
+              if (!message.confirmed || message.preview_id !== "statistics-demo") throw new Error("Unreviewed statistics write");
+              status.history.push({ mode: "statistics", job_id: "20261024T170000Z-abcdef123456", source: "sensor.old", target: "sensor.new", status: "statistics_transferred" });
+              return { message: "Statistics rename verified; configuration restore cannot undo it.", job_id: "statistics-demo" };
             case "entity_replacer/restore": window.restored = true; return { documents_restored: 2, message: "Backup restored." };
             default: throw new Error("Unexpected request");
           }
@@ -109,6 +117,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       await panel.locator("#review").click();
       await panel.locator("#apply").waitFor();
       assert.equal(await panel.locator("#apply").isEnabled(), true);
+      await panel.locator(".file summary").first().click();
       await panel.locator("[data-ref]").first().check();
       assert.equal(await panel.locator("#apply").count(), 0);
       await panel.locator("#review").click();
@@ -133,6 +142,15 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       await panel.locator("#restore-confirm").check();
       await panel.locator("#restore").click();
       await page.waitForFunction(() => window.restored);
+      await panel.locator("[data-statistics-preview]").click();
+      await panel.locator("#statistics-confirm").waitFor();
+      assert.equal(await panel.locator("#statistics-apply").isDisabled(), true);
+      await panel.locator("#statistics-confirm").check();
+      assert.equal(await panel.locator("#statistics-apply").isDisabled(), false);
+      await panel.locator("#statistics-apply").click();
+      await page.waitForFunction(() => window.panel.shadowRoot.textContent.includes("Audit: statistics-demo"));
+      assert.equal(await panel.locator("#statistics-apply").count(), 0);
+      assert.equal(await panel.locator('#backup option[value="20261024T170000Z-abcdef123456"]').count(), 0);
       assert.deepEqual(errors, []);
       await page.close();
       console.log(`Frontend ${mode} workflow and overflow checks passed at ${viewport.width}px.`);

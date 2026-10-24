@@ -39,6 +39,12 @@ async def _respond(hass, connection, msg, action: str) -> None:
             result = await manager.apply(connection.user.id, msg["preview_id"], msg["selected_ids"])
         elif action == "review":
             result = await manager.review(connection.user.id, msg["preview_id"], msg["selected_ids"])
+        elif action == "statistics_preview":
+            result = await manager.statistics_preview(connection.user.id, msg["source"].strip(), msg["target"].strip())
+        elif action == "statistics_apply":
+            result = await manager.statistics_apply(connection.user.id, msg["preview_id"], msg["confirmed"])
+        elif action == "statistics_verify":
+            result = await manager.statistics_verify(msg["job_id"])
         else:
             result = await manager.restore(msg["job_id"])
         connection.send_result(msg["id"], result)
@@ -129,6 +135,39 @@ async def ws_restore(hass, connection, msg):
     await _respond(hass, connection, msg, "restore")
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/statistics_preview",
+    vol.Required("source"): str,
+    vol.Required("target"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_statistics_preview(hass, connection, msg):
+    await _respond(hass, connection, msg, "statistics_preview")
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/statistics_apply",
+    vol.Required("preview_id"): str,
+    vol.Required("confirmed"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_statistics_apply(hass, connection, msg):
+    await _respond(hass, connection, msg, "statistics_apply")
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/statistics_verify",
+    vol.Required("job_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_statistics_verify(hass, connection, msg):
+    await _respond(hass, connection, msg, "statistics_verify")
+
+
 def register_commands(hass) -> None:
-    for handler in (ws_status, ws_scan, ws_device_plan, ws_scan_device, ws_review, ws_apply, ws_restore):
+    for handler in (ws_status, ws_scan, ws_device_plan, ws_scan_device, ws_review, ws_apply, ws_restore,
+                    ws_statistics_preview, ws_statistics_apply, ws_statistics_verify):
         websocket_api.async_register_command(hass, handler)
