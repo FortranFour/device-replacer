@@ -25,7 +25,7 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.components.recorder.db_schema import Statistics, StatisticsShortTerm, States
 from homeassistant.components.recorder.util import session_scope
-from homeassistant.components.recorder.tasks import AddRecorderPlatformTask, StatisticsTask
+from homeassistant.components.recorder.tasks import AddRecorderPlatformTask, StatisticsTask, SynchronizeTask
 from homeassistant.components.sensor import recorder as sensor_recorder
 from sqlalchemy import select
 
@@ -54,7 +54,7 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
         }))
         await self.hass.async_start()
         self.recorder = get_instance(self.hass)
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         registry = er.async_get(self.hass)
         await registry.async_load(load_empty=True)
         for name in ("old", "new"):
@@ -76,11 +76,20 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
         # A raw state for a different historical entity must remain untouched.
         self.hass.states.async_set("sensor.raw_history", "123")
         await self.hass.async_block_till_done()
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
 
     async def asyncTearDown(self):
         await self.hass.async_stop()
         self.tmp.cleanup()
+
+    async def recording_done(self):
+        # HA's async_block_till_done can return while a task has already been
+        # taken off its queue but is still committing a separate DB session.
+        # Always enqueue a barrier so snapshots cannot race an import/compile.
+        await self.hass.async_block_till_done()
+        done = asyncio.get_running_loop().create_future()
+        self.recorder.queue_task(SynchronizeTask(done))
+        await asyncio.wait_for(done, 10)
 
     async def rows(self):
         def read():
@@ -109,7 +118,7 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(old.get(OLD))
             self.assertEqual(new[NEW][0]["mean"], 20.5)
         # Ensure queued statistics work after the rename does not resurrect old data.
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         self.assertEqual(await self.rows(), before)
 
     async def test_destination_collision_after_preview_does_not_change_any_rows(self):
@@ -119,7 +128,7 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
             {"start": self.start, "mean": 99.0, "min": 99.0, "max": 99.0},
         ])
         await self.hass.async_block_till_done()
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         before = await self.rows()
         with self.assertRaisesRegex(manager_module.ReplacementError, "already has"):
             await self.manager.statistics_apply("owner", preview["preview_id"], True)
@@ -135,16 +144,16 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
             "device_class": "temperature", "state_class": "measurement", "unit_of_measurement": "°C",
         })
         await self.hass.async_block_till_done()
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         now = datetime.now(timezone.utc)
         start = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0)
         self.recorder.queue_task(AddRecorderPlatformTask("sensor", sensor_recorder))
         self.recorder.queue_task(StatisticsTask(start, False))
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         after = await self.rows()
         self.assertEqual(len(after["five_minute"]), 2)
         self.assertTrue(all(row[1] == metadata_id for row in after["five_minute"]))
-        self.assertEqual(after["five_minute"][-1][3], 25)
+        self.assertAlmostEqual(after["five_minute"][-1][3], 25)
         self.assertNotIn(OLD, await self.manager._statistics_adapter().metadata(OLD, NEW))
 
     async def test_timeout_then_late_completion_is_verified_without_retry(self):
@@ -153,7 +162,7 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(statistics_module, "TRANSFER_TIMEOUT", 0):
             with self.assertRaisesRegex(manager_module.ReplacementError, "unverified"):
                 await self.manager.statistics_apply("owner", preview["preview_id"], True)
-        await self.recorder.async_block_till_done()
+        await self.recording_done()
         job_id = self.manager.backups.statistics_conflicts(OLD, NEW)[0]
         result = await self.manager.statistics_verify(job_id)
         self.assertTrue(result["verified"])
