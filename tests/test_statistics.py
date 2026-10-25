@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import importlib
 import time
 import types
 import unittest
@@ -54,6 +55,16 @@ class StatisticsTests(unittest.IsolatedAsyncioTestCase):
             entry.original_device_class = "temperature"
             entry.capabilities = {"state_class": "measurement"}
             entry.unit_of_measurement = "°C"
+        self.registry_updates = []
+        def update(entity_id, *, disabled_by):
+            self.registry_updates.append(entity_id)
+            self.hass.registry.entities[entity_id].disabled_by = disabled_by
+            return self.hass.registry.entities[entity_id]
+        self.hass.registry.async_update_entity = update
+        statistics = importlib.import_module("er_test_package.statistics")
+        disabler = patch.object(statistics.er, "RegistryEntryDisabler", types.SimpleNamespace(USER="user"), create=True)
+        disabler.start()
+        self.addCleanup(disabler.stop)
         self.recorder = MemoryRecorder()
         self.manager._statistics_adapter = lambda: self.recorder
 
@@ -195,3 +206,102 @@ class StatisticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(self.recorder.calls, calls)
         self.assertEqual(self.manager.backups.statistics_conflicts(OLD, NEW), [])
+
+    async def test_disable_only_reviewed_entities_and_wait_for_real_unload(self):
+        other = types.SimpleNamespace(disabled_by=None, device_id="new-device")
+        self.hass.registry.entities["sensor.other"] = other
+        for entity_id in (OLD, NEW):
+            self.hass.registry.entities[entity_id].disabled_by = None
+            self.hass.states.values[entity_id] = types.SimpleNamespace(state="20")
+        preview = await self.preview()
+        self.assertFalse(preview["eligible"])
+        self.assertTrue(preview["can_disable"])
+        with self.assertRaisesRegex(engine.ReplacementError, "different action"):
+            await self.transfer(preview)
+        waiting = await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertEqual(self.registry_updates, [OLD, NEW])
+        self.assertIsNone(other.disabled_by)
+        self.assertTrue(waiting["waiting_for_unload"])
+        self.assertFalse(waiting["can_disable"])
+        self.assertFalse(waiting["eligible"])
+        self.assertIsNotNone(self.hass.states.get(OLD), "Never force-remove a loaded state")
+        self.assertEqual(self.recorder.calls, 0)
+        with self.assertRaises(engine.ReplacementError):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.hass.states.values.pop(OLD)
+        self.hass.states.values.pop(NEW)
+        ready = await self.preview()
+        self.assertTrue(ready["eligible"])
+        self.assertTrue(all(item["disabled"] and not item["loaded"] for item in ready["entities"]))
+
+    async def test_disabling_needs_confirmation_owner_and_unexpired_preview(self):
+        self.hass.registry.entities[NEW].disabled_by = None
+        preview = await self.preview()
+        for owner, confirmed in (("other", True), ("owner", False)):
+            with self.assertRaises(engine.ReplacementError):
+                await self.manager.statistics_disable(owner, preview["preview_id"], confirmed)
+        self.manager.statistics_previews[preview["preview_id"]]["created"] -= 10000
+        with self.assertRaises(engine.ReplacementError):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertEqual(self.registry_updates, [])
+
+    async def test_existing_destination_is_rejected_before_offering_to_disable(self):
+        self.hass.registry.entities[NEW].disabled_by = None
+        self.recorder.meta[NEW] = (8, {})
+        preview = await self.preview()
+        self.assertIn("already has", preview["reason"])
+        self.assertFalse(preview.get("can_disable", False))
+        self.assertNotIn("preview_id", preview)
+        self.assertEqual(self.registry_updates, [])
+
+    async def test_disable_preserves_existing_disable_reason(self):
+        self.hass.registry.entities[OLD].disabled_by = "integration"
+        self.hass.registry.entities[NEW].disabled_by = None
+        preview = await self.preview()
+        result = await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertEqual(self.registry_updates, [NEW])
+        self.assertEqual(self.hass.registry.entities[OLD].disabled_by, "integration")
+        self.assertTrue(result["eligible"])
+
+    async def test_disable_rechecks_identity_and_statistics(self):
+        self.hass.registry.entities[NEW].disabled_by = None
+        preview = await self.preview()
+        self.hass.registry.entities[NEW].unique_id = "changed"
+        with self.assertRaisesRegex(engine.ReplacementError, "changed"):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        preview = await self.preview()
+        self.recorder.meta[NEW] = (8, {})
+        with self.assertRaisesRegex(engine.ReplacementError, "already has"):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertEqual(self.registry_updates, [])
+
+    async def test_identity_changed_during_recorder_await_is_not_disabled(self):
+        self.hass.registry.entities[NEW].disabled_by = None
+        preview = await self.preview()
+        original = self.recorder.metadata
+        async def change_identity(*args):
+            result = await original(*args)
+            self.hass.registry.entities[NEW].unique_id = "changed during read"
+            return result
+        self.recorder.metadata = change_identity
+        with self.assertRaisesRegex(engine.ReplacementError, "identity changed"):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertEqual(self.registry_updates, [])
+
+    async def test_partial_disable_failure_is_reported_and_requires_fresh_check(self):
+        for entity_id in (OLD, NEW):
+            self.hass.registry.entities[entity_id].disabled_by = None
+        preview = await self.preview()
+        update = self.hass.registry.async_update_entity
+        def fail_second(entity_id, **kwargs):
+            if entity_id == NEW:
+                raise RuntimeError("registry rejected update")
+            return update(entity_id, **kwargs)
+        self.hass.registry.async_update_entity = fail_second
+        with self.assertRaisesRegex(engine.ReplacementError, "One may already be disabled"):
+            await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        self.assertIsNotNone(self.hass.registry.entities[OLD].disabled_by)
+        self.assertIsNone(self.hass.registry.entities[NEW].disabled_by)
+        self.assertNotIn(preview["preview_id"], self.manager.statistics_previews)
+        self.assertTrue((await self.preview())["can_disable"])
+        self.assertEqual(self.recorder.calls, 0)

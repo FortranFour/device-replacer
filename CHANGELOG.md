@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 — prerelease
+
+- Add a reviewed Disable both sensor entities action inside the statistics interface.
+- Check statistics eligibility before offering to disable entities, then use Home Assistant's entity registry API for only the selected pair. Preserve existing disable reasons.
+- Show enabled, disabled/waiting, and disabled/unloaded status; poll briefly after disabling and provide Refresh status.
+- Keep transfer blocked until actual unloading and fresh review; do not remove states or reload whole devices/integrations automatically.
+- Cover entity controls, partial failures and unchanged companion entities in unit and real recorder tests.
+
 ## 1.2.0 — prerelease
 
 - Add a separate reviewed statistics transfer for compatible disabled measurement sensors with an unused destination statistics ID.

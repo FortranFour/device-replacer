@@ -1,4 +1,4 @@
-/* Device Replacer 1.2.0. No external frontend libraries or build step. */
+/* Device Replacer 1.2.1. No external frontend libraries or build step. */
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
@@ -261,6 +261,31 @@ class EntityReplacerPanel extends HTMLElement {
     });
   }
 
+  async _disableStatistics() {
+    if (this._busy || !this._statisticsPreview?.can_disable) return;
+    const preview = this._statisticsPreview;
+    this._statisticsPreview = null;
+    await this._run("Disabling the two sensor entities and waiting for them to unload…", async () => {
+      let result = await this._request("statistics_disable", { preview_id: preview.preview_id, confirmed: true });
+      // Poll readiness, never force-remove a state or reload a whole device.
+      for (let attempt = 0; attempt < 5 && result.waiting_for_unload; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        result = await this._request("statistics_preview", { source: preview.source, target: preview.target });
+      }
+      this._statisticsPreview = result;
+      this._notice = "The selected sensor entities are disabled. Review their readiness below before transferring statistics.";
+    });
+  }
+
+  async _refreshStatistics() {
+    if (this._busy || !this._statisticsPreview) return;
+    const { source, target } = this._statisticsPreview;
+    this._statisticsPreview = null;
+    await this._run("Checking sensor status and statistics…", async () => {
+      this._statisticsPreview = await this._request("statistics_preview", { source, target });
+    });
+  }
+
   async _applyStatistics() {
     if (!this._statisticsPreview?.eligible || !this._query("#statistics-confirm")?.checked) return;
     const previewId = this._statisticsPreview.preview_id;
@@ -293,9 +318,9 @@ class EntityReplacerPanel extends HTMLElement {
     const pairs = this._statisticsPairs();
     const preview = this._statisticsPreview;
     const audit = (this._history || []).filter((item) => item.mode === "statistics");
-    return `<section class="card"><h2>Transfer historical statistics (limited preview)</h2><p>Separate from reference replacement. Supports arithmetic measurement sensors with identical units; existing replacement statistics and cumulative counters are blocked.</p><p>Keep both sensors registered, disable them in Settings → Devices &amp; services → Entities, and wait until unloaded. The old sensor must remain disabled afterward. No measurements or raw state history are copied.</p>
+    return `<section class="card"><h2>Transfer historical statistics (limited preview)</h2><p>Separate from reference replacement. Supports arithmetic measurement sensors with identical units; existing replacement statistics and cumulative counters are blocked.</p><p>Keep both sensors registered. Check the pair below, then use Disable both sensor entities and wait until they unload. You do not need to disable either device. Keep the old sensor disabled afterward.</p>
       ${pairs.length ? pairs.map((pair, index) => `<div class="actions"><code>${escapeHtml(pair.source)} → ${escapeHtml(pair.target)}</code><button data-statistics-preview="${index}" ${this._busy ? "disabled" : ""}>Check statistics</button></div>`).join("") : '<p class="secondary">Choose a sensor pair above, or confirm the device entity mappings.</p>'}
-      ${preview ? `<div class="${preview.eligible ? "bubble" : "warning"}"><strong>${escapeHtml(preview.source)} → ${escapeHtml(preview.target)}</strong>${preview.eligible ? `<p>${escapeHtml(preview.device_class)} · ${escapeHtml(preview.unit)}. The destination has no stored statistics metadata.</p><p>Latest retained periods: hourly ${escapeHtml(this._statisticsTime(preview.latest.hourly[0]?.start))}; five-minute ${escapeHtml(this._statisticsTime(preview.latest.five_minute[0]?.start))}.</p><p>The existing series will be renamed. Configuration and Energy settings stay unchanged. Configuration Restore cannot undo this operation.</p><label class="check"><input id="statistics-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> I reviewed this pair, confirm they measure the same quantity, and have a current database-inclusive backup for recovery.</label><button id="statistics-apply" class="primary" disabled>Transfer reviewed statistics</button>` : `<p>${escapeHtml(preview.reason)}</p>`}</div>` : ""}
+      ${preview ? `<div class="${preview.eligible ? "bubble" : "warning"}"><strong>${escapeHtml(preview.source)} → ${escapeHtml(preview.target)}</strong>${preview.entities?.length ? `<ul aria-label="Sensor entity status">${preview.entities.map((entity) => `<li><code>${escapeHtml(entity.entity_id)}</code>: ${!entity.registered ? "not registered" : !entity.disabled ? "enabled" : entity.loaded ? "disabled; waiting to unload" : "disabled &amp; unloaded — ready"}</li>`).join("")}</ul>` : ""}${preview.eligible ? `<p>${escapeHtml(preview.device_class)} · ${escapeHtml(preview.unit)}. The destination has no stored statistics metadata.</p><p>Latest retained periods: hourly ${escapeHtml(this._statisticsTime(preview.latest.hourly[0]?.start))}; five-minute ${escapeHtml(this._statisticsTime(preview.latest.five_minute[0]?.start))}.</p><p>The existing series will be renamed. Configuration and Energy settings stay unchanged. Configuration Restore cannot undo this operation.</p><label class="check"><input id="statistics-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> I reviewed this pair, confirm they measure the same quantity, and have a current database-inclusive backup for recovery.</label><button id="statistics-apply" class="primary" disabled>Transfer reviewed statistics</button>` : `<p>${escapeHtml(preview.reason)}</p>${preview.can_disable ? `<p>This stops updates from these two sensor entities. You can re-enable an entity in its Home Assistant entity settings.</p><button id="statistics-disable" ${this._busy ? "disabled" : ""}>Disable both sensor entities</button>` : ""}${preview.waiting_for_unload ? "<p>Waiting for Home Assistant to unload the sensors. If they remain loaded, reload their integration or restart Home Assistant, then refresh status.</p>" : ""}`}<div class="actions"><button id="statistics-refresh" ${this._busy ? "disabled" : ""}>Refresh status</button></div></div>` : ""}
       ${audit.length ? `<details><summary>Statistics transfer audit</summary>${audit.map((item) => `<p><code>${escapeHtml(item.job_id)}</code> · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)} ${["statistics_applying", "statistics_outcome_unknown"].includes(item.status) ? `<button data-statistics-verify="${escapeHtml(item.job_id)}" ${this._busy ? "disabled" : ""}>Check outcome</button>` : ""}</p>`).join("")}<p>Audit records contain no database backup. An unverified outcome blocks further transfers involving those sensors until the audit/database is reconciled.</p></details>` : ""}</section>`;
   }
 
@@ -404,7 +429,7 @@ class EntityReplacerPanel extends HTMLElement {
       .reference { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--divider-color,#e4e8ec); } .reference-body { min-width:0; flex:1; } .manual { display:block; padding:2px 6px; border-radius:5px; font-size:12px; background:rgba(255,170,0,.18); } pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 monospace; background:var(--secondary-background-color,#f4f6f8); border-radius:7px; padding:10px; }
       .diff { border-top:1px solid var(--divider-color,#dce1e7); } .diff pre { max-height:520px; overflow:auto; white-space:pre; } .coverage { margin:20px 0; } li { margin:6px 0; } .empty { padding:20px; } .progress { color:var(--primary-color,#0288d1); margin:12px 0; } .backup-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .backup-row select { flex:1; min-width:230px; } .restore-check { margin-top:16px; }
       @media(max-width:640px) { main { padding:12px; } .fields,.mapping-row { grid-template-columns:1fr; gap:14px; } .card { padding:15px; } header { padding:12px; } .reference { gap:8px; } button { min-height:44px; } .backup-row select { min-width:0; flex-basis:100%; } }
-    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.0")}</span></header><main>
+    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.1")}</span></header><main>
       <section class="bubble"><strong>Replace a device and its entity references</strong><p>Choose the old and new devices, confirm their entity roles, then review and apply selected changes with backups. Single-entity replacement is also available.</p></section>
       ${this._error ? `<div class="error" role="alert">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHtml(this._notice)}</div>` : ""}
       <section class="card"><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}
@@ -525,6 +550,8 @@ class EntityReplacerPanel extends HTMLElement {
       this._query("#statistics-apply").disabled = this._busy || !event.target.checked;
     });
     on("#statistics-apply", "click", () => this._applyStatistics());
+    on("#statistics-disable", "click", () => this._disableStatistics());
+    on("#statistics-refresh", "click", () => this._refreshStatistics());
     for (const button of this.shadowRoot.querySelectorAll("[data-statistics-verify]")) {
       button.addEventListener("click", () => this._verifyStatistics(button.dataset.statisticsVerify));
     }

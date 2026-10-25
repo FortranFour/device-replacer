@@ -10,7 +10,7 @@ The integration updates literal references in YAML and saved UI dashboards. Comp
 
 It adds a **Device Replacer** page to the administrator sidebar. There is no dashboard card, frontend resource entry, or `configuration.yaml` setup. The internal domain, installation directory and panel URL remain `entity_replacer` and `/entity-replacer` so existing Entity Replacer installs upgrade in place.
 
-Maintained by [FortranFour](https://github.com/FortranFour). Prerelease version: **1.2.0** (for testing; latest stable remains **1.1.3**). Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
+Maintained by [FortranFour](https://github.com/FortranFour). Prerelease version: **1.2.1** (for testing; latest stable remains **1.1.3**). Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
 
 <img width="1352" height="1151" alt="Screenshot 2026-10-05 104154" src="https://github.com/user-attachments/assets/89a87a1b-38c2-409e-babf-6179e8c9e9a3" />
 
@@ -247,12 +247,13 @@ Requirements are deliberately strict:
 ### Transfer a fresh replacement
 
 1. Create and verify a current backup that includes your recorder database. Device Replacer's configuration backups do **not** contain that database. For an external database, use its appropriate backup process.
-2. Disable the old sensor and keep it disabled. Pair the replacement, verify its role, then disable its sensor before it accumulates statistics. Wait for both sensors to unload; reload their integration or restart Home Assistant if necessary. Do not delete either entity from the registry.
+2. Pair the replacement and verify its role. Proceed before its sensor accumulates statistics. Keep both sensor entities registered; do not delete them.
 3. In Device Replacer, choose the pair in **Single entity**, or load and confirm whole-device entity mappings. Open **Transfer historical statistics** and click **Check statistics** for one pair. This read-only check works even if there are no configuration references to replace.
-4. Review the pair, class, units and latest retained periods. Confirm the measurement role and database backup, then select **Transfer reviewed statistics**. The preview is session-bound, expires after 15 minutes, and is checked again at execution.
-5. Wait for the verified result, then enable **only the replacement sensor**. Review its statistics in Developer tools. Replace configuration references separately; if the replacement is disabled during that scan, enable **Allow unavailable or disabled replacements** for reference edits only.
+4. If the statistics checks pass but a sensor is enabled, click **Disable both sensor entities**. This uses Home Assistant's entity registry API to disable just the selected pair; it does not disable either whole device or overwrite an existing disable reason. The panel checks for unloading briefly and shows each entity's status. If it still says **waiting to unload**, reload its integration or restart Home Assistant yourself, then use **Refresh status**. Transfer remains blocked while either entity is enabled or loaded.
+5. Review the pair, class, units and latest retained periods. Confirm the measurement role and database backup, then select **Transfer reviewed statistics**. The preview is session-bound, expires after 15 minutes, and is checked again at execution.
+6. Wait for the verified result, then enable **only the replacement sensor**. Review its statistics in Developer tools. Replace configuration references separately; if the replacement is disabled during that scan, enable **Allow unavailable or disabled replacements** for reference edits only.
 
-Home Assistant can refuse a rename without raising an exception. Device Replacer therefore waits for recorder completion and verifies the destination metadata and numeric ID rather than trusting the callback. No database schema migration or direct SQL is used.
+Home Assistant can refuse a rename without raising an exception. Device Replacer therefore waits for recorder completion and verifies the destination metadata and numeric ID rather than trusting the callback. No database schema migration or direct SQL is used. Entity disabling is a separate action from statistics transfer and is not undone by configuration Restore. If you stop before transferring, re-enable any entity you want to resume through its Home Assistant entity settings; after a successful transfer, keep the old sensor disabled.
 
 ### Audit and recovery
 

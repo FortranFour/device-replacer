@@ -1,7 +1,7 @@
 """Constants for Device Replacer."""
 
 DOMAIN = "entity_replacer"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 PANEL_PATH = "entity-replacer"
 PANEL_NAME = "entity-replacer-panel"
 STATIC_PATH = "/entity_replacer_static"

@@ -18,7 +18,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
         window.calls = [];
         window.restored = false;
         const status = {
-          version: "1.1.3",
+          version: "1.2.1",
           devices: [{ id: "a".repeat(32), name: "Old plug", manufacturer: "Example", model: "Meter", entities: 1 }, { id: "b".repeat(32), name: "New plug", manufacturer: "Example", model: "Meter", entities: 1 }],
           entities: [
             { entity_id: "sensor.old", name: "Old power sensor", state: "unavailable" },
@@ -74,9 +74,16 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
               status.history = [{ job_id: "20261002T170000Z-abcdef123456", created: "2026-10-02T17:00:00+00:00", source: "sensor.old", target: "sensor.new", status: "applied" }];
               return { references_changed: message.selected_ids.length, documents_changed: message.selected_ids.length, message: "Changes saved. Check configuration, then restart Home Assistant.", backup_path: "/config/.entity_replacer_backups/demo" };
             case "entity_replacer/statistics_preview": return {
-              eligible: true, preview_id: "statistics-demo", source: message.source, target: message.target,
+              eligible: Boolean(window.statisticsDisabled), can_disable: !window.statisticsDisabled,
+              preview_id: window.statisticsDisabled ? "statistics-demo" : "disable-demo", source: message.source, target: message.target,
+              reason: "Disable both sensor entities and wait until they unload.",
+              entities: [message.source, message.target].map((entity_id) => ({ entity_id, registered: true, disabled: Boolean(window.statisticsDisabled), loaded: !window.statisticsDisabled })),
               device_class: "temperature", unit: "°C", latest: { hourly: [{ start: 1700000000 }], five_minute: [] },
             };
+            case "entity_replacer/statistics_disable":
+              if (!message.confirmed || message.preview_id !== "disable-demo") throw new Error("Unreviewed disable");
+              window.statisticsDisabled = true;
+              return { source: "sensor.old", target: "sensor.new", eligible: false, waiting_for_unload: true };
             case "entity_replacer/statistics_apply":
               if (!message.confirmed || message.preview_id !== "statistics-demo") throw new Error("Unreviewed statistics write");
               status.history.push({ mode: "statistics", job_id: "20261024T170000Z-abcdef123456", source: "sensor.old", target: "sensor.new", status: "statistics_transferred" });
@@ -143,7 +150,16 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       await panel.locator("#restore").click();
       await page.waitForFunction(() => window.restored);
       await panel.locator("[data-statistics-preview]").click();
+      await panel.locator("#statistics-disable").waitFor();
+      assert.equal(await panel.locator("#statistics-apply").count(), 0);
+      if (qaDir) await page.screenshot({ path: path.join(qaDir, `statistics-disable-${mode}-${viewport.width}.png`), fullPage: true });
+      await panel.locator("#statistics-disable").click();
       await panel.locator("#statistics-confirm").waitFor();
+      assert.ok((await panel.locator('[aria-label="Sensor entity status"]').textContent()).includes("ready"));
+      assert.equal(await panel.locator("#statistics-disable").count(), 0);
+      const statisticsOverflow = await page.evaluate(() => [...window.panel.shadowRoot.querySelectorAll("#statistics-section,.card,.bubble")].some((node) => node.scrollWidth > node.clientWidth + 1));
+      assert.equal(statisticsOverflow, false, "Statistics readiness panel overflows");
+      if (qaDir) await page.screenshot({ path: path.join(qaDir, `statistics-ready-${mode}-${viewport.width}.png`), fullPage: true });
       assert.equal(await panel.locator("#statistics-apply").isDisabled(), true);
       await panel.locator("#statistics-confirm").check();
       assert.equal(await panel.locator("#statistics-apply").isDisabled(), false);
