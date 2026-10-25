@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2 — prerelease
+
+- Explain how to choose Single entity, fill Entity to replace and Replacement entity, and then check statistics; retain the Whole device mapping alternative.
+- No changes to transfer or entity-disable behavior.
+
 ## 1.2.1 — prerelease
 
 - Add a reviewed Disable both sensor entities action inside the statistics interface.
