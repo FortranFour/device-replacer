@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 — unreleased
+## 1.2.0 — prerelease
 
 - Add a separate reviewed statistics transfer for compatible disabled measurement sensors with an unused destination statistics ID.
 - Use recorder metadata APIs, preserve both statistics tables, verify completion, and leave raw history/configuration unchanged.

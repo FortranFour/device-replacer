@@ -1,4 +1,4 @@
-# Device Replacer 1.2.0 (unreleased)
+# Device Replacer 1.2.0 — prerelease
 
 Add a separate statistics transfer workflow for compatible arithmetic measurement sensors. The source and replacement must both be disabled and unloaded, retain verifiable registry metadata, and use matching units/classes. The replacement must have no stored statistics metadata.
 
@@ -6,4 +6,4 @@ Transfer uses recorder's metadata API and verifies the result. Hourly and retain
 
 A database-inclusive backup is required for recovery. Statistics operations have separate audit records and are never undone by configuration Restore. Uncertain recorder outcomes consume the preview and block further transfers involving the pair until reconciled.
 
-No release has been published. Real recorder tests target Home Assistant 2026.3.0 with SQLite; other database engines and production installations still need validation.
+This is a prerelease for testing before a stable release. Real recorder tests target Home Assistant 2026.3.0 with SQLite; other database engines and production installations still need validation.

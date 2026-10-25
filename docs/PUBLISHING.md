@@ -188,3 +188,10 @@ Concept, requirements, design decisions, field testing and maintenance: FortranF
 - [HACS integration requirements](https://www.hacs.dev/docs/publish/integration/)
 - [HACS custom repositories](https://www.hacs.dev/docs/faq/custom_repositories/)
 - [Home Assistant local brand images](https://developers.home-assistant.io/docs/core/integration/brand_images/)
+
+
+## Publish a prerelease
+
+The separate `Prerelease` workflow publishes with `--prerelease --latest=false` and includes the installation ZIP and checksums. It runs only on `main` when `.github/prerelease.json` changes, or when manually dispatched on `main`. Set its `tag` to match the integration manifest version, and merge the reviewed change. The workflow reruns unit/frontend tests, the pinned real recorder tests, hassfest and HACS checks before publishing. It creates the tag at the checked merge commit; the token-created tag does not recursively trigger the stable tag workflow.
+
+Do not push that tag separately through the existing stable `Release` workflow. A prerelease does not replace the latest stable release. Promoting it to stable is a separate deliberate action after installation testing.

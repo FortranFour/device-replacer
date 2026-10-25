@@ -1,0 +1,107 @@
+name: Prerelease
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/prerelease.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-prerelease
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - id: version
+        name: Validate prerelease request
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          tag = json.loads(Path('.github/prerelease.json').read_text())['tag']
+          manifest = json.loads(Path('custom_components/entity_replacer/manifest.json').read_text())
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Invalid version tag'
+          assert tag == 'v' + manifest['version'], 'Tag and manifest version differ'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'tag={tag}\n')
+          PY
+
+  tests:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -v
+      - run: node tests/frontend_unit.cjs
+      - run: node --check custom_components/entity_replacer/frontend/panel.js
+      - run: python scripts/build_release.py --check-only --tag '${{ needs.prepare.outputs.tag }}'
+
+  recorder-tests:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install homeassistant==2026.3.0
+      - run: python -m unittest discover -s ha_tests -v
+
+  hassfest:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+
+  publish:
+    needs: [prepare, tests, recorder-tests, hassfest, hacs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build installation ZIP
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: python scripts/build_release.py --tag "$RELEASE_TAG"
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Device Replacer $RELEASE_TAG — prerelease" \
+            --notes-file RELEASE_NOTES.md
