@@ -46,9 +46,10 @@ function panel() {
   };
   value._review = null;
   value._render = () => {};
+  value.shadowRoot = { querySelectorAll: () => [] };
   const nodes = new Map();
   value._query = (selector) => {
-    if (!nodes.has(selector)) nodes.set(selector, { disabled: false, textContent: "", innerHTML: "", scrollIntoView() {} });
+    if (!nodes.has(selector)) nodes.set(selector, { disabled: false, textContent: "", innerHTML: "", scrollIntoView() {}, addEventListener() {} });
     return nodes.get(selector);
   };
   return value;
@@ -177,4 +178,34 @@ function panel() {
   value._updateControls();
   assert.equal(value._query("#load-mappings").disabled, true);
   console.log("A removed selection becomes explicit, and a missing replacement cannot load mappings.");
+  value = panel();
+  assert.equal(value._statisticsPairs().length, 1);
+  value._mode = "device";
+  value._mappings = [{ source: "sensor.old", target: "sensor.new" }];
+  assert.equal(value._statisticsPairs().length, 0);
+  value._mappingConfirmed = true;
+  assert.equal(value._statisticsPairs().length, 1);
+  value._statisticsPreview = { source: "<old>", target: "sensor.new", eligible: false, reason: "<blocked>" };
+  html = value._renderStatistics();
+  assert.ok(html.includes("&lt;blocked&gt;"));
+  assert.ok(!html.includes('id="statistics-apply"'));
+  value._statisticsPreview = { source: "sensor.old", target: "sensor.new", eligible: true, preview_id: "stats",
+    unit: "°C", device_class: "temperature", latest: { hourly: [], five_minute: [] } };
+  html = value._renderStatistics();
+  assert.ok(html.includes('id="statistics-apply" class="primary" disabled'));
+  assert.ok(html.includes("database-inclusive backup"));
+  let statsCalls = 0;
+  value._request = async () => { statsCalls++; throw new Error("Recorder timed out"); };
+  value._refreshHistory = async () => {};
+  await value._applyStatistics();
+  assert.equal(statsCalls, 0, "A statistics write needs explicit confirmation");
+  value._query("#statistics-confirm").checked = true;
+  await value._applyStatistics();
+  assert.equal(statsCalls, 1);
+  assert.equal(value._statisticsPreview, null, "An uncertain statistics write cannot be retried with its old token");
+  assert.ok(value._error.includes("timed out"));
+  value._statisticsPreview = { eligible: true };
+  value._invalidate();
+  assert.equal(value._statisticsPreview, null, "Changing the pair invalidates statistics review");
+  console.log("Statistics role selection, escaping, consent and uncertain-write gating passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

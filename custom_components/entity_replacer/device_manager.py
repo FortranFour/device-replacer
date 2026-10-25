@@ -311,7 +311,7 @@ class DeviceWorkflow:
                 mode="device", mappings=rows, source_device=source, target_device=target, registry_snapshot=fingerprint, device_blocks=blocks)
             if old is None:
                 warnings.append("The old device is removed. Only its entered device ID and explicitly supplied entity/registry IDs can be found; omitted former entities cannot be discovered.")
-            warnings.append("Review unassigned entities and manual device blocks. Pairing, identities, areas/labels, and historical statistics are not transferred.")
+            warnings.append("Review unassigned entities and manual device blocks. Pairing, identities, areas/labels, and historical statistics are not transferred by reference replacement; eligible measurement statistics have a separate transfer action.")
             return await self._public_preview(preview_id, preview, warnings + notes, file_count, dashboard_count)
 
     async def _check_device_preview(self, preview, selected):

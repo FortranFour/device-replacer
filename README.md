@@ -10,7 +10,7 @@ The integration updates literal references in YAML and saved UI dashboards. Comp
 
 It adds a **Device Replacer** page to the administrator sidebar. There is no dashboard card, frontend resource entry, or `configuration.yaml` setup. The internal domain, installation directory and panel URL remain `entity_replacer` and `/entity-replacer` so existing Entity Replacer installs upgrade in place.
 
-Maintained by [FortranFour](https://github.com/FortranFour). Current release: **1.1.3**. Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
+Maintained by [FortranFour](https://github.com/FortranFour). Prerelease version: **1.2.0** (for testing; latest stable remains **1.1.3**). Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
 
 <img width="1352" height="1151" alt="Screenshot 2026-10-05 104154" src="https://github.com/user-attachments/assets/89a87a1b-38c2-409e-babf-6179e8c9e9a3" />
 
@@ -137,11 +137,11 @@ The limits are 8 MiB per file or dashboard, 64 MiB of filesystem content, 10,000
 
 **UI helpers and integration settings:** Open **Settings → Devices & services**, select the named integration or helper, and edit its referenced entity through the owning UI. Some integrations require a helper to be recreated. The report shows the physical storage path and location for identification, but the integration never rewrites those internal stores directly.
 
-**Energy dashboard:** Enable **Additional scan options → Report references in other internal storage (manual review)** to report literal matching references in Energy settings. Change the configured sensor under **Settings → Dashboards → Energy**. Energy configuration is report-only in this release. Replacing an entity reference does not migrate or merge the old sensor's historical energy statistics.
+**Energy dashboard:** Enable **Additional scan options → Report references in other internal storage (manual review)** to report literal matching references in Energy settings. Change the configured sensor under **Settings → Dashboards → Energy**. Energy configuration is report-only in this release. Replacing an entity reference does not migrate or merge the old sensor's historical energy statistics. The separate statistics transfer below intentionally excludes cumulative energy counters.
 
 **Cross-domain changes:** Replacing a `switch` with a `light`, or a `sensor` with a `binary_sensor`, can require different actions, values, conditions, and card types. This release restricts automatic replacement to the same domain. Even within a domain, inspect device capabilities, service data, thresholds, and units in the preview.
 
-**Computed references and external systems:** IDs assembled from pieces, wildcard/regex selections, aliases selected through areas or labels, former device/entity IDs you have not supplied after registry removal, and add-on-owned configurations such as Node-RED are not fully discoverable by a literal scan. Review those separately. Replacing references does not rename or delete the source entity, migrate recorder history or statistics, pair hardware, or transfer entity/device registry identity.
+**Computed references and external systems:** IDs assembled from pieces, wildcard/regex selections, aliases selected through areas or labels, former device/entity IDs you have not supplied after registry removal, and add-on-owned configurations such as Node-RED are not fully discoverable by a literal scan. Review those separately. Replacing references does not rename or delete the source entity, migrate recorder history or statistics, pair hardware, or transfer entity/device registry identity. Statistics transfer is a separate, explicitly reviewed operation with the limits below.
 
 ## Report-only use
 
@@ -230,3 +230,44 @@ Report issues at [FortranFour/device-replacer/issues](https://github.com/Fortran
 - [Native storage persistence source](https://github.com/home-assistant/core/blob/dev/homeassistant/helpers/storage.py)
 
 The integration reads version-dependent Lovelace objects to enumerate dashboards and identify their storage paths. If those interfaces are unavailable, unsupported dashboard references remain manual-review items rather than being written by an unsafe fallback.
+
+## Historical statistics transfer (limited first version)
+
+This operation addresses [issue #1](https://github.com/FortranFour/device-replacer/issues/1) for compatible **measurement** sensors. It renames the existing recorder statistics series to the replacement entity ID through Home Assistant's Python recorder API. Hourly and retained five-minute statistics remain attached to the same numeric metadata ID. It does not copy measurements, merge two series, change raw state history, rewrite configuration, or change Energy Dashboard settings.
+
+Requirements are deliberately strict:
+
+- A running recorder and the supported metadata API (Home Assistant 2026.3+).
+- Both entities remain registered, are disabled, and have no loaded state. Simply being unavailable is insufficient. Removed sources cannot be verified in this version.
+- Both registry entries declare `state_class: measurement`, the same known device class, and the same nonempty unit. The source's stored unit must match exactly. No unit conversion is attempted.
+- The source contains recorder-owned arithmetic-mean statistics and at least one retained hourly or five-minute record.
+- The replacement has **no statistics metadata**, including an empty metadata record. Existing replacement statistics are never deleted to make room.
+- `total`, `total_increasing`, cumulative energy counters, external statistics and circular means are unsupported.
+
+### Transfer a fresh replacement
+
+1. Create and verify a current backup that includes your recorder database. Device Replacer's configuration backups do **not** contain that database. For an external database, use its appropriate backup process.
+2. Disable the old sensor and keep it disabled. Pair the replacement, verify its role, then disable its sensor before it accumulates statistics. Wait for both sensors to unload; reload their integration or restart Home Assistant if necessary. Do not delete either entity from the registry.
+3. In Device Replacer, choose the pair in **Single entity**, or load and confirm whole-device entity mappings. Open **Transfer historical statistics** and click **Check statistics** for one pair. This read-only check works even if there are no configuration references to replace.
+4. Review the pair, class, units and latest retained periods. Confirm the measurement role and database backup, then select **Transfer reviewed statistics**. The preview is session-bound, expires after 15 minutes, and is checked again at execution.
+5. Wait for the verified result, then enable **only the replacement sensor**. Review its statistics in Developer tools. Replace configuration references separately; if the replacement is disabled during that scan, enable **Allow unavailable or disabled replacements** for reference edits only.
+
+Home Assistant can refuse a rename without raising an exception. Device Replacer therefore waits for recorder completion and verifies the destination metadata and numeric ID rather than trusting the callback. No database schema migration or direct SQL is used.
+
+### Audit and recovery
+
+Each attempt writes a durable audit manifest under `.entity_replacer_backups/<job_id>/manifest.json` before queuing recorder work. Statistics audit entries appear separately in the panel and cannot be selected for configuration Restore; the backend also rejects that operation. There is no automatic database undo after recording resumes.
+
+A timeout, cancellation, failed verification, or interrupted transfer has an **unverified outcome**: recorder work may still finish. The reviewed token is consumed, and unresolved audit entries block further transfers involving either ID even after restart. Do not retry blindly. Inspect the database, Home Assistant log and audit manifest; recover using your database-inclusive backup if needed. Use **Check outcome** in the statistics audit to verify a late completion without submitting another recorder job. It clears the unresolved audit only when the original numeric metadata ID is provably at the destination and the source is absent. Otherwise it stays blocked: inspect/recover the database and audit record. This version does not offer a force/retry button. Do not change these sensors' registry settings from another session while a transfer is running.
+
+### Development checks
+
+The ordinary unit suite uses HA stubs. Run real recorder tests separately so those stubs cannot mask API compatibility:
+
+```bash
+uv venv --python 3.14 /tmp/device-replacer-ha
+uv pip install --python /tmp/device-replacer-ha/bin/python homeassistant==2026.3.0
+/tmp/device-replacer-ha/bin/python -m unittest discover -s ha_tests -v
+```
+
+These tests use a temporary SQLite database and real Home Assistant recorder APIs. They check hourly/five-minute row preservation, metadata ID continuity, unchanged raw history, and collision refusal. No production Home Assistant connection is used.

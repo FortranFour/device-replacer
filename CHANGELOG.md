@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — prerelease
+
+- Add a separate reviewed statistics transfer for compatible disabled measurement sensors with an unused destination statistics ID.
+- Use recorder metadata APIs, preserve both statistics tables, verify completion, and leave raw history/configuration unchanged.
+- Block existing destination statistics, cumulative counters, incompatible units/classes, and unverifiable sources.
+- Persist statistics audit records, prevent blind retries after uncertain outcomes, and exclude them from configuration Restore.
+- Add standalone and real Home Assistant 2026.3 SQLite recorder tests.
+
 ## 1.1.3 — 2026-10-10
 
 - Hide the panel header sidebar toggle in desktop/wide mode.
