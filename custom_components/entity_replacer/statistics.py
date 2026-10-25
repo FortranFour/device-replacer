@@ -18,6 +18,10 @@ from .const import PREVIEW_TTL
 from .engine import ReplacementError, digest, json_bytes, validate_pair
 
 TRANSFER_TIMEOUT = 30
+POST_TRANSFER_INSTRUCTIONS = (
+    "Open Settings → Devices & services → Entities, open the replacement sensor's settings, "
+    "and turn on Enabled. Leave the old sensor disabled."
+)
 
 
 class RecorderStatistics:
@@ -107,7 +111,7 @@ class StatisticsWorkflow:
                 manifest["status"] = "statistics_transferred"
                 await self._io(self.backups.save, manifest)
             return {"job_id": job_id, "verified": verified,
-                    "message": "Statistics rename verified; the audit is reconciled. Keep the old sensor disabled." if verified else
+                    "message": "Statistics rename verified; the audit is reconciled. " + POST_TRANSFER_INSTRUCTIONS if verified else
                     "Rename cannot be verified. No database changes or retries were made; the audit remains unresolved. Inspect the database and recorder log before recovery."}
 
     async def _statistics_check(self, source, target, *, require_disabled=True):
@@ -258,4 +262,4 @@ class StatisticsWorkflow:
                 raise ReplacementError(f"Statistics outcome is unverified. Recorder work may still complete; do not retry blindly. Audit {manifest['job_id']}. Configuration was not changed.") from err
             return {"job_id": manifest["job_id"], "source": source, "target": target,
                     "status": manifest["status"],
-                    "message": "Statistics metadata rename verified. Enable only the replacement sensor. Raw state history and configuration were unchanged. Configuration restore cannot undo this transfer."}
+                    "message": "Statistics metadata rename verified. " + POST_TRANSFER_INSTRUCTIONS + " Raw state history and configuration were unchanged. Configuration restore cannot undo this transfer."}
