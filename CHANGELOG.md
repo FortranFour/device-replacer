@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3 — prerelease
+
+- Include the exact entity-settings navigation for re-enabling the replacement, and the reminder to leave the old sensor disabled, in both successful transfer and late-completion verification messages.
+- Match the README instructions; transfer and entity-disable behavior are unchanged.
+
 ## 1.2.2 — prerelease
 
 - Explain how to choose Single entity, fill Entity to replace and Replacement entity, and then check statistics; retain the Whole device mapping alternative.

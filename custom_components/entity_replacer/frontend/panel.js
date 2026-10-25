@@ -1,4 +1,4 @@
-/* Device Replacer 1.2.2. No external frontend libraries or build step. */
+/* Device Replacer 1.2.3. No external frontend libraries or build step. */
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
@@ -429,7 +429,7 @@ class EntityReplacerPanel extends HTMLElement {
       .reference { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--divider-color,#e4e8ec); } .reference-body { min-width:0; flex:1; } .manual { display:block; padding:2px 6px; border-radius:5px; font-size:12px; background:rgba(255,170,0,.18); } pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 monospace; background:var(--secondary-background-color,#f4f6f8); border-radius:7px; padding:10px; }
       .diff { border-top:1px solid var(--divider-color,#dce1e7); } .diff pre { max-height:520px; overflow:auto; white-space:pre; } .coverage { margin:20px 0; } li { margin:6px 0; } .empty { padding:20px; } .progress { color:var(--primary-color,#0288d1); margin:12px 0; } .backup-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .backup-row select { flex:1; min-width:230px; } .restore-check { margin-top:16px; }
       @media(max-width:640px) { main { padding:12px; } .fields,.mapping-row { grid-template-columns:1fr; gap:14px; } .card { padding:15px; } header { padding:12px; } .reference { gap:8px; } button { min-height:44px; } .backup-row select { min-width:0; flex-basis:100%; } }
-    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.2")}</span></header><main>
+    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.3")}</span></header><main>
       <section class="bubble"><strong>Replace a device and its entity references</strong><p>Choose the old and new devices, confirm their entity roles, then review and apply selected changes with backups. Single-entity replacement is also available.</p></section>
       ${this._error ? `<div class="error" role="alert">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHtml(this._notice)}</div>` : ""}
       <section class="card"><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}
