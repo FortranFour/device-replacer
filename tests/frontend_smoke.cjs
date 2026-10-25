@@ -18,7 +18,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
         window.calls = [];
         window.restored = false;
         const status = {
-          version: "1.2.1",
+          version: "1.3.0",
           devices: [{ id: "a".repeat(32), name: "Old plug", manufacturer: "Example", model: "Meter", entities: 1 }, { id: "b".repeat(32), name: "New plug", manufacturer: "Example", model: "Meter", entities: 1 }],
           entities: [
             { entity_id: "sensor.old", name: "Old power sensor", state: "unavailable" },
@@ -88,6 +88,21 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
               if (!message.confirmed || message.preview_id !== "statistics-demo") throw new Error("Unreviewed statistics write");
               status.history.push({ mode: "statistics", job_id: "20261024T170000Z-abcdef123456", source: "sensor.old", target: "sensor.new", status: "statistics_transferred" });
               return { message: "Statistics rename verified; configuration restore cannot undo it.", job_id: "statistics-demo" };
+            case "entity_replacer/reuse_preview": return {
+              preview_id: window.reuseDisabled ? "reuse-ready" : "reuse-pause",
+              mappings: message.mappings.map((row) => ({ ...row, retire_entry: true })),
+              entities: ["sensor.old", "sensor.new"].map((entity_id) => ({ entity_id, disabled: Boolean(window.reuseDisabled), loaded: !window.reuseDisabled })),
+              ready: Boolean(window.reuseDisabled), can_disable: !window.reuseDisabled,
+              manual_references: [{ file: "automations.yaml", line: 2, snippet: "entity_id: sensor.new" }], manual_reference_count: 1, warnings: [],
+            };
+            case "entity_replacer/reuse_disable":
+              if (!message.confirmed || message.preview_id !== "reuse-pause") throw new Error("Unreviewed ID reuse pause");
+              window.reuseDisabled = true;
+              return { preview_id: "reuse-waiting", mappings: [{ source: "sensor.old", target: "sensor.new", retire_entry: true }], entities: [{ entity_id: "sensor.new", disabled: true, loaded: true }], ready: false, can_disable: false };
+            case "entity_replacer/reuse_apply":
+              if (!message.confirmed || message.preview_id !== "reuse-ready") throw new Error("Unreviewed ID reuse");
+              status.history.push({ mode: "id_reuse", job_id: "20261025T170000Z-abcdef123456", source: "sensor.old", target: "sensor.new", status: "id_reuse_completed" });
+              return { job_id: "reuse-audit", message: "Old entity IDs and retained history verified." };
             case "entity_replacer/restore": window.restored = true; return { documents_restored: 2, message: "Backup restored." };
             default: throw new Error("Unexpected request");
           }
@@ -167,6 +182,22 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       await page.waitForFunction(() => window.panel.shadowRoot.textContent.includes("Audit: statistics-demo"));
       assert.equal(await panel.locator("#statistics-apply").count(), 0);
       assert.equal(await panel.locator('#backup option[value="20261024T170000Z-abcdef123456"]').count(), 0);
+      await panel.locator("#strategy").selectOption("reuse");
+      assert.equal(await panel.locator("#statistics-section").textContent(), "");
+      await panel.locator("#scan").click();
+      await panel.locator("#reuse-disable").waitFor();
+      assert.equal(await panel.locator("#reuse-apply").count(), 0);
+      await panel.locator("#reuse-disable").click();
+      await panel.locator("#reuse-refresh").click();
+      await panel.locator("#reuse-confirm").waitFor();
+      assert.equal(await panel.locator("#reuse-apply").isDisabled(), true);
+      if (qaDir) await page.screenshot({ path: path.join(qaDir, `identity-reuse-${mode}-${viewport.width}.png`), fullPage: true });
+      const reuseOverflow = await page.evaluate(() => [...window.panel.shadowRoot.querySelectorAll("main,.card,.fields")].some((node) => node.scrollWidth > node.clientWidth + 1));
+      assert.equal(reuseOverflow, false);
+      await panel.locator("#reuse-confirm").check();
+      await panel.locator("#reuse-apply").click();
+      await page.waitForFunction(() => window.panel.shadowRoot.textContent.includes("Audit: reuse-audit"));
+      assert.equal(await panel.locator('#backup option[value="20261025T170000Z-abcdef123456"]').count(), 0);
       assert.deepEqual(errors, []);
       await page.close();
       console.log(`Frontend ${mode} workflow and overflow checks passed at ${viewport.width}px.`);

@@ -39,6 +39,12 @@ async def _respond(hass, connection, msg, action: str) -> None:
             result = await manager.apply(connection.user.id, msg["preview_id"], msg["selected_ids"])
         elif action == "review":
             result = await manager.review(connection.user.id, msg["preview_id"], msg["selected_ids"])
+        elif action == "reuse_preview":
+            result = await manager.reuse_preview(connection.user.id, msg["mappings"])
+        elif action == "reuse_disable":
+            result = await manager.reuse_disable(connection.user.id, msg["preview_id"], msg["confirmed"])
+        elif action == "reuse_apply":
+            result = await manager.reuse_apply(connection.user.id, msg["preview_id"], msg["confirmed"])
         elif action == "statistics_preview":
             result = await manager.statistics_preview(connection.user.id, msg["source"].strip(), msg["target"].strip())
         elif action == "statistics_apply":
@@ -180,7 +186,38 @@ async def ws_statistics_disable(hass, connection, msg):
     await _respond(hass, connection, msg, "statistics_disable")
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/reuse_preview",
+    vol.Required("mappings"): [{vol.Required("source"): str, vol.Required("target"): str}],
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_reuse_preview(hass, connection, msg):
+    await _respond(hass, connection, msg, "reuse_preview")
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/reuse_disable",
+    vol.Required("preview_id"): str, vol.Required("confirmed"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_reuse_disable(hass, connection, msg):
+    await _respond(hass, connection, msg, "reuse_disable")
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/reuse_apply",
+    vol.Required("preview_id"): str, vol.Required("confirmed"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_reuse_apply(hass, connection, msg):
+    await _respond(hass, connection, msg, "reuse_apply")
+
+
 def register_commands(hass) -> None:
     for handler in (ws_status, ws_scan, ws_device_plan, ws_scan_device, ws_review, ws_apply, ws_restore,
-                    ws_statistics_preview, ws_statistics_apply, ws_statistics_verify, ws_statistics_disable):
+                    ws_statistics_preview, ws_statistics_apply, ws_statistics_verify, ws_statistics_disable,
+                    ws_reuse_preview, ws_reuse_disable, ws_reuse_apply):
         websocket_api.async_register_command(hass, handler)
