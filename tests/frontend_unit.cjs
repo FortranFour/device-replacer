@@ -208,4 +208,30 @@ function panel() {
   value._invalidate();
   assert.equal(value._statisticsPreview, null, "Changing the pair invalidates statistics review");
   console.log("Statistics role selection, escaping, consent and uncertain-write gating passed.");
+
+  value = panel();
+  value._statisticsPreview = { source: "sensor.old", target: "sensor.new", eligible: false, can_disable: true, preview_id: "disable",
+    reason: "Disable both", entities: [{ entity_id: "<sensor>", registered: true, disabled: false, loaded: true }] };
+  html = value._renderStatistics();
+  assert.ok(html.includes('id="statistics-disable"'));
+  assert.ok(html.includes("&lt;sensor&gt;"));
+  assert.ok(!html.includes('id="statistics-apply"'));
+  const disableRequests = [];
+  value._request = async (action, fields) => {
+    disableRequests.push({ action, fields });
+    return { source: "sensor.old", target: "sensor.new", eligible: true, preview_id: "fresh-transfer" };
+  };
+  await value._disableStatistics();
+  assert.equal(disableRequests[0].action, "statistics_disable");
+  assert.equal(disableRequests[0].fields.preview_id, "disable");
+  assert.equal(disableRequests[0].fields.confirmed, true);
+  assert.equal(value._statisticsPreview.preview_id, "fresh-transfer");
+  assert.ok(!value._query("#statistics-confirm").checked, "Disabling never confirms a statistics transfer");
+  value._request = async () => { throw new Error("Registry failure"); };
+  value._statisticsPreview = { eligible: false, can_disable: true, preview_id: "uncertain-disable" };
+  value._refreshHistory = async () => {};
+  await value._disableStatistics();
+  assert.equal(value._statisticsPreview, null, "Uncertain entity changes require a fresh preview");
+  assert.ok(value._error.includes("Registry failure"));
+  console.log("Entity disable controls are reviewed, escaped, and separate from statistics transfer consent.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

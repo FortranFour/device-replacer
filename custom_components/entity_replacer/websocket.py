@@ -45,6 +45,8 @@ async def _respond(hass, connection, msg, action: str) -> None:
             result = await manager.statistics_apply(connection.user.id, msg["preview_id"], msg["confirmed"])
         elif action == "statistics_verify":
             result = await manager.statistics_verify(msg["job_id"])
+        elif action == "statistics_disable":
+            result = await manager.statistics_disable(connection.user.id, msg["preview_id"], msg["confirmed"])
         else:
             result = await manager.restore(msg["job_id"])
         connection.send_result(msg["id"], result)
@@ -167,7 +169,18 @@ async def ws_statistics_verify(hass, connection, msg):
     await _respond(hass, connection, msg, "statistics_verify")
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): DOMAIN + "/statistics_disable",
+    vol.Required("preview_id"): str,
+    vol.Required("confirmed"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_statistics_disable(hass, connection, msg):
+    await _respond(hass, connection, msg, "statistics_disable")
+
+
 def register_commands(hass) -> None:
     for handler in (ws_status, ws_scan, ws_device_plan, ws_scan_device, ws_review, ws_apply, ws_restore,
-                    ws_statistics_preview, ws_statistics_apply, ws_statistics_verify):
+                    ws_statistics_preview, ws_statistics_apply, ws_statistics_verify, ws_statistics_disable):
         websocket_api.async_register_command(hass, handler)

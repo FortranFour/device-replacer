@@ -67,11 +67,11 @@ class RecorderStatistics:
         await asyncio.wait_for(done.wait(), TRANSFER_TIMEOUT)
 
 
-def _identity(hass, entity_id):
+def _identity(hass, entity_id, *, require_disabled=True):
     entry = er.async_get(hass).async_get(entity_id)
     if entry is None:
         raise ReplacementError(f"Keep {entity_id} registered and disabled so its measurement role can be verified.")
-    if entry.disabled_by is None or hass.states.get(entity_id) is not None:
+    if require_disabled and (entry.disabled_by is None or hass.states.get(entity_id) is not None):
         raise ReplacementError(f"Disable {entity_id} in Settings → Devices & services → Entities and wait until it is unloaded. Unavailable alone is insufficient.")
     capabilities = getattr(entry, "capabilities", None) or {}
     device_class = getattr(entry, "device_class", None) or getattr(entry, "original_device_class", None)
@@ -110,14 +110,15 @@ class StatisticsWorkflow:
                     "message": "Statistics rename verified; the audit is reconciled. Keep the old sensor disabled." if verified else
                     "Rename cannot be verified. No database changes or retries were made; the audit remains unresolved. Inspect the database and recorder log before recovery."}
 
-    async def _statistics_check(self, source, target):
+    async def _statistics_check(self, source, target, *, require_disabled=True):
         validate_pair(source, target)
         if not source.startswith("sensor."):
             raise ReplacementError("Only sensor statistics can be transferred.")
         conflicts = await self._io(self.backups.statistics_conflicts, source, target)
         if conflicts:
             raise ReplacementError("An earlier statistics transfer has an unresolved outcome. Inspect the recorder/database and audit record before further transfers: " + ", ".join(conflicts))
-        old, new = _identity(self.hass, source), _identity(self.hass, target)
+        old, new = (_identity(self.hass, entity_id, require_disabled=require_disabled)
+                    for entity_id in (source, target))
         if old["device_class"] != new["device_class"] or old["unit"] != new["unit"] or not old["unit"]:
             raise ReplacementError("Sensors must have the same known device class and unit; unit conversion is not supported.")
         adapter = self._statistics_adapter()
@@ -135,15 +136,28 @@ class StatisticsWorkflow:
                     "metadata_id": metadata_id, "metadata": dict(meta)}
         return adapter, snapshot
 
+    def _statistics_entity_status(self, source, target):
+        entities = []
+        for entity_id in (source, target):
+            entry = er.async_get(self.hass).async_get(entity_id)
+            entities.append({"entity_id": entity_id, "registered": entry is not None,
+                             "disabled": entry is not None and entry.disabled_by is not None,
+                             "loaded": self.hass.states.get(entity_id) is not None})
+        return entities
+
     async def statistics_preview(self, owner, source, target):
         async with self.lock:
             try:
-                adapter, snapshot = await self._statistics_check(source, target)
+                adapter, snapshot = await self._statistics_check(source, target, require_disabled=False)
             except ReplacementError as err:
-                return {"source": source, "target": target, "eligible": False, "reason": str(err)}
+                return {"source": source, "target": target, "entities": self._statistics_entity_status(source, target),
+                        "eligible": False, "reason": str(err)}
             latest = await adapter.latest(source)
             if not any(latest.values()):
-                return {"source": source, "target": target, "eligible": False, "reason": "The source has metadata but no retained hourly or five-minute statistics."}
+                return {"source": source, "target": target, "entities": self._statistics_entity_status(source, target),
+                        "eligible": False, "reason": "The source has metadata but no retained hourly or five-minute statistics."}
+            entities = self._statistics_entity_status(source, target)
+            ready = all(item["disabled"] and not item["loaded"] for item in entities)
             now = time.monotonic()
             self.statistics_previews = {key: item for key, item in self.statistics_previews.items()
                                         if now - item["created"] < PREVIEW_TTL}
@@ -153,18 +167,59 @@ class StatisticsWorkflow:
             self.statistics_previews[token] = {
                 "owner": owner, "source": source, "target": target, "created": now,
                 "snapshot": snapshot, "fingerprint": digest(json_bytes(snapshot)),
+                "purpose": "transfer" if ready else "disable",
             }
             return {"preview_id": token, "source": source, "target": target,
-                    "eligible": True, "unit": snapshot["metadata"]["unit_of_measurement"],
+                    "entities": entities, "eligible": ready,
+                    "can_disable": not ready and any(not item["disabled"] for item in entities),
+                    "waiting_for_unload": not ready and all(item["disabled"] for item in entities),
+                    "reason": "" if ready else "Disable both sensor entities and wait until they unload before transfer. Unavailable alone is insufficient.",
+                    "unit": snapshot["metadata"]["unit_of_measurement"],
                     "device_class": snapshot["source_identity"]["device_class"],
                     "latest": latest, "expires_in_seconds": PREVIEW_TTL}
 
+    def _statistics_review(self, owner, preview_id, purpose):
+        preview = self.statistics_previews.get(preview_id)
+        if (not preview or preview["owner"] != owner
+                or time.monotonic() - preview["created"] >= PREVIEW_TTL):
+            raise ReplacementError("Statistics preview expired or belongs to another session. Preview again.")
+        if preview["purpose"] != purpose:
+            raise ReplacementError("Sensor readiness changed or this preview is for a different action. Check statistics again.")
+        return preview
+
+    async def statistics_disable(self, owner, preview_id, confirmed=False):
+        """Disable only the reviewed sensor entities through the registry API.
+
+        Never remove states ourselves or reload whole integrations/devices to
+        simulate unloading. Actual entity platforms must handle that lifecycle.
+        """
+        async with self.lock:
+            preview = self._statistics_review(owner, preview_id, "disable")
+            if confirmed is not True:
+                raise ReplacementError("Confirm disabling the two reviewed sensor entities first.")
+            source, target = preview["source"], preview["target"]
+            _, snapshot = await self._statistics_check(source, target, require_disabled=False)
+            if digest(json_bytes(snapshot)) != preview["fingerprint"]:
+                raise ReplacementError("Sensor identity or statistics metadata changed. Preview again before disabling.")
+            # Recheck identities after recorder awaits and before either write.
+            for key, entity_id in (("source_identity", source), ("target_identity", target)):
+                if _identity(self.hass, entity_id, require_disabled=False) != snapshot[key]:
+                    raise ReplacementError("Sensor identity changed. Check statistics again before disabling.")
+            self.statistics_previews.pop(preview_id, None)
+            registry = er.async_get(self.hass)
+            try:
+                for entity_id in (source, target):
+                    entry = registry.async_get(entity_id)
+                    # Preserve an existing integration/device/user disable reason.
+                    if entry.disabled_by is None:
+                        registry.async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.USER)
+            except Exception as err:
+                raise ReplacementError("Could not disable both sensor entities. One may already be disabled; check their status again. No statistics were transferred.") from err
+        return await self.statistics_preview(owner, source, target)
+
     async def statistics_apply(self, owner, preview_id, confirmed=False):
         async with self.lock:
-            preview = self.statistics_previews.get(preview_id)
-            if (not preview or preview["owner"] != owner
-                    or time.monotonic() - preview["created"] >= PREVIEW_TTL):
-                raise ReplacementError("Statistics preview expired or belongs to another session. Preview again.")
+            preview = self._statistics_review(owner, preview_id, "transfer")
             if confirmed is not True:
                 raise ReplacementError("Confirm the reviewed pair, measurement role and database-inclusive backup before transfer.")
             source, target = preview["source"], preview["target"]

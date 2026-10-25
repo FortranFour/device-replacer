@@ -169,6 +169,56 @@ class RealRecorderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.backups.statistics_conflicts(OLD, NEW), [])
         self.assertEqual(await self.rows(), before)
 
+    async def test_interface_disables_entities_but_never_forces_unload_or_changes_companion(self):
+        registry = er.async_get(self.hass)
+        for entity_id in (OLD, NEW):
+            registry.async_update_entity(entity_id, disabled_by=None)
+            self.hass.states.async_set(entity_id, "21", {
+                "device_class": "temperature", "state_class": "measurement", "unit_of_measurement": "°C",
+            })
+        companion = registry.async_get_or_create(
+            "sensor", "test", "companion", suggested_object_id="companion",
+            original_device_class="temperature", unit_of_measurement="°C",
+            capabilities={"state_class": "measurement"},
+        )
+        self.hass.states.async_set(companion.entity_id, "10")
+        await self.recording_done()
+        before = await self.rows()
+        preview = await self.manager.statistics_preview("owner", OLD, NEW)
+        self.assertTrue(preview["can_disable"], preview)
+        waiting = await self.manager.statistics_disable("owner", preview["preview_id"], True)
+        for entity_id in (OLD, NEW):
+            self.assertEqual(registry.async_get(entity_id).disabled_by, er.RegistryEntryDisabler.USER)
+            self.assertIsNotNone(self.hass.states.get(entity_id))
+        self.assertIsNone(registry.async_get(companion.entity_id).disabled_by)
+        self.assertEqual(self.hass.states.get(companion.entity_id).state, "10")
+        self.assertTrue(waiting["waiting_for_unload"])
+        self.assertFalse(waiting["eligible"])
+        self.assertEqual(await self.rows(), before)
+        # This fixture has no live entity platform. Simulate the platform's
+        # unload event; production code must never remove states itself.
+        for entity_id in (OLD, NEW):
+            self.hass.states.async_remove(entity_id)
+        ready = await self.manager.statistics_preview("owner", OLD, NEW)
+        self.assertTrue(ready["eligible"], ready)
+        transferred = await self.manager.statistics_apply("owner", ready["preview_id"], True)
+        self.assertEqual(transferred["status"], "statistics_transferred")
+
+    async def test_existing_replacement_history_does_not_offer_or_perform_disabling(self):
+        registry = er.async_get(self.hass)
+        for entity_id in (OLD, NEW):
+            registry.async_update_entity(entity_id, disabled_by=None)
+        async_import_statistics(self.hass, dict(self.meta, statistic_id=NEW), [
+            {"start": self.start, "mean": 99.0, "min": 99.0, "max": 99.0},
+        ])
+        await self.recording_done()
+        preview = await self.manager.statistics_preview("owner", OLD, NEW)
+        self.assertIn("already has", preview["reason"])
+        self.assertFalse(preview.get("can_disable", False))
+        self.assertNotIn("preview_id", preview)
+        for entity_id in (OLD, NEW):
+            self.assertIsNone(registry.async_get(entity_id).disabled_by)
+
 
 if __name__ == "__main__":
     unittest.main()
