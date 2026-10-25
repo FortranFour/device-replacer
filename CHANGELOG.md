@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — prerelease
+
+- Add an initial choice between updating replacement references and reusing retiring entity IDs/history.
+- Add reviewed native entity-ID reuse with guarded removal of mapped retiring registry entries, disable/readiness controls and durable audit records.
+- Preserve old raw/statistics identities, keep existing replacement history separate, and report device bindings and replacement-ID references for manual review.
+- Block cumulative counters and unsafe/mismatched mappings; require hardware retirement and a full registry/database-inclusive backup.
+- Add real recorder tests for raw history, statistics collisions, removed sources, multi-entity batches and new readings under reused IDs.
+
 ## 1.2.3 — prerelease
 
 - Include the exact entity-settings navigation for re-enabling the replacement, and the reminder to leave the old sensor disabled, in both successful transfer and late-completion verification messages.

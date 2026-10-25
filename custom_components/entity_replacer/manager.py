@@ -23,6 +23,7 @@ from .const import PREVIEW_TTL, VERSION
 from .device import DeviceBlock
 from .device_manager import DeviceWorkflow
 from .statistics import StatisticsWorkflow
+from .identity import IdentityWorkflow
 from .engine import (
     BackupStore, Document, MAX_FILE_BYTES, ReplacementError, build_candidate,
     digest, json_bytes, read_file, render_report, replace_file, scan_dashboard,
@@ -50,7 +51,7 @@ class Preview:
     device_blocks: list[DeviceBlock] = field(default_factory=list)
 
 
-class EntityReplacer(DeviceWorkflow, StatisticsWorkflow):
+class EntityReplacer(DeviceWorkflow, StatisticsWorkflow, IdentityWorkflow):
     """All mutations are serialized; external editors are guarded by hashes."""
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -59,6 +60,7 @@ class EntityReplacer(DeviceWorkflow, StatisticsWorkflow):
         self.backups = BackupStore(self.root)
         self.previews: dict[str, Preview] = {}
         self.statistics_previews: dict[str, dict] = {}
+        self.identity_previews: dict[str, dict] = {}
         self.lock = asyncio.Lock()
 
     async def _io(self, function, *args):
@@ -388,8 +390,8 @@ class EntityReplacer(DeviceWorkflow, StatisticsWorkflow):
     async def restore(self, job_id: str) -> dict:
         async with self.lock:
             manifest = await self._io(self.backups.load, job_id)
-            if manifest.get("mode") == "statistics":
-                raise ReplacementError("Statistics audit records are not configuration backups. Database recovery requires your database-inclusive backup; this Restore action cannot undo statistics transfers.")
+            if manifest.get("mode") in {"statistics", "id_reuse"}:
+                raise ReplacementError("History/registry audit records are not configuration backups. Recovery requires your full Home Assistant backup including the recorder database; this Restore action cannot undo history or registry operations.")
             candidates = []
             for record in manifest["items"]:
                 before = await self._io(self.backups.payload, manifest, record, "before")

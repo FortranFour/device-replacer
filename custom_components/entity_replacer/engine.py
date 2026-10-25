@@ -733,9 +733,10 @@ class BackupStore:
                 manifest = self.load(directory.name)
             except (OSError, ValueError, KeyError, ReplacementError) as err:
                 raise ReplacementError(f"Cannot verify audit record {directory.name}; inspect it before transferring statistics.") from err
-            if (manifest.get("mode") == "statistics"
-                    and manifest.get("status") in {"statistics_applying", "statistics_outcome_unknown"}
-                    and {source, target} & {manifest["source"], manifest["target"]}):
+            if (manifest.get("mode") in {"statistics", "id_reuse"}
+                    and manifest.get("status") in {"statistics_applying", "statistics_outcome_unknown", "id_reuse_applying", "id_reuse_outcome_unknown"}
+                    and {source, target} & ({manifest["source"], manifest["target"]} |
+                        {row[key] for row in manifest.get("mappings", []) for key in ("source", "target")})):
                 conflicts.append(manifest["job_id"])
         return conflicts
 

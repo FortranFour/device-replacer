@@ -56,7 +56,7 @@ def check_repository(tag: str | None) -> tuple[str, list[Path]]:
     if hacs.get("homeassistant") != "2026.3.0" or hacs.get("content_in_root", False) or hacs.get("zip_release", False):
         raise ValueError("This package uses the standard repository layout and local brands from HA 2026.3.")
     for name in ("__init__.py", "config_flow.py", "compat.py", "const.py", "engine.py", "manager.py",
-                 "device.py", "device_manager.py", "statistics.py", "websocket.py", "strings.json", "translations/en.json", "frontend/panel.js", "frontend/icon.svg"):
+                 "device.py", "device_manager.py", "statistics.py", "identity.py", "websocket.py", "strings.json", "translations/en.json", "frontend/panel.js", "frontend/icon.svg"):
         if not (COMPONENT / name).is_file():
             raise ValueError(f"Missing runtime file: {name}")
     for path in COMPONENT.rglob("*.json"):

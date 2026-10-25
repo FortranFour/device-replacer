@@ -234,4 +234,23 @@ function panel() {
   assert.equal(value._statisticsPreview, null, "Uncertain entity changes require a fresh preview");
   assert.ok(value._error.includes("Registry failure"));
   console.log("Entity disable controls are reviewed, escaped, and separate from statistics transfer consent.");
+
+  value = panel();
+  value._strategy = "reuse";
+  value._reusePreview = { ready: true, preview_id: "reuse", mappings: [{ source: "sensor.old", target: "sensor.new", retire_entry: true }], entities: [], manual_references: [{ file: "<script>", snippet: "<img>" }], manual_reference_count: 1 };
+  html = value._renderResults();
+  assert.ok(html.includes("&lt;script&gt;"));
+  assert.ok(!html.includes('id="apply"'));
+  assert.ok(html.includes('id="reuse-apply" class="primary" disabled'));
+  let identityWrites = 0;
+  value._request = async () => { identityWrites++; throw new Error("Uncertain registry change"); };
+  value._refreshHistory = async () => {};
+  await value._reuseAction("reuse_apply");
+  assert.equal(identityWrites, 0);
+  value._query("#reuse-confirm").checked = true;
+  await value._reuseAction("reuse_apply");
+  assert.equal(identityWrites, 1);
+  assert.equal(value._reusePreview, null);
+  assert.ok(value._error.includes("Uncertain registry change"));
+  console.log("ID reuse has a separate review/consent flow, escapes manual references and never blindly retries.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

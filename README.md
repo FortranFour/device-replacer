@@ -4,13 +4,13 @@
 
 This Home Assistant custom integration addresses the problem when a device fails and its entities are used across a Home Assistant installation, including in dashboards, automations, scripts, etc. It automates substitution of the replacement device's entities in user configurable files.
 
-Select the old and new devices, confirm the mapping between their entities, inspect the preview, and apply selected changes with backups. Single-entity mode is also available. Working, unavailable and disabled source devices/entities are included; removed sources can be entered explicitly.
+First choose whether to update references to the replacement or reuse the retiring entity IDs and retained history. Select the old and new devices, confirm the mapping between their entities, inspect the preview, and apply the reviewed action. Reference edits have configuration backups; ID reuse requires your full Home Assistant backup including the recorder database. Single-entity mode is also available. Working, unavailable and disabled source devices/entities are included; removed sources can be entered explicitly.
 
 The integration updates literal references in YAML and saved UI dashboards. Compatible YAML device automation blocks can change both device and entity selectors after capability validation. Other settings get a report with file paths and line numbers for manual follow-up. Add/pair the replacement hardware through its normal integration first.
 
 It adds a **Device Replacer** page to the administrator sidebar. There is no dashboard card, frontend resource entry, or `configuration.yaml` setup. The internal domain, installation directory and panel URL remain `entity_replacer` and `/entity-replacer` so existing Entity Replacer installs upgrade in place.
 
-Maintained by [FortranFour](https://github.com/FortranFour). Prerelease version: **1.2.3** (for testing; latest stable remains **1.1.3**). Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
+Maintained by [FortranFour](https://github.com/FortranFour). Prerelease version: **1.3.0** (for testing; latest stable remains **1.1.3**). Requires **Home Assistant 2026.3.0 or newer**, including the bundled local brand images. It uses Home Assistant's existing Python dependencies and has no frontend CDN or additional pip requirements.
 
 <img width="1352" height="1151" alt="Screenshot 2026-10-05 104154" src="https://github.com/user-attachments/assets/89a87a1b-38c2-409e-babf-6179e8c9e9a3" />
 
@@ -272,3 +272,32 @@ uv pip install --python /tmp/device-replacer-ha/bin/python homeassistant==2026.3
 ```
 
 These tests use a temporary SQLite database and real Home Assistant recorder APIs. They check hourly/five-minute row preservation, metadata ID continuity, unchanged raw history, and collision refusal. No production Home Assistant connection is used.
+
+## Choose a replacement strategy
+
+The first selector offers two different workflows:
+
+| Strategy | Effect | History | Main limitation |
+| --- | --- | --- | --- |
+| Update references to the new device and entity IDs | Existing reference-replacement workflow, with previews and configuration backups | Unchanged unless the separate statistics-transfer action is used | Only references in the supported scan/edit scope can be updated automatically |
+| Reuse the retiring entity IDs & history | Assign the retiring entities' technical IDs to the replacement entities through Home Assistant's registry API | Retained raw history and compatible measurement statistics stay under the old IDs; subsequent readings can continue there | Device-based bindings and references using the replacement's previous IDs need separate review; no history merge or cumulative-counter support |
+
+In the second workflow, the **new device retains its own device ID, unique IDs, pairing and registry UUIDs**. Its mapped entities take the old technical IDs (for example, `sensor.room_temperature`) and the old entity name when known. Device names, areas and labels are not copied.
+
+### Reuse old entity IDs
+
+1. Make a **full Home Assistant backup including the recorder database** and verify how to restore it. For an external database, include a consistent backup of that database. Configuration/job snapshots alone cannot recover this operation.
+2. Pair the replacement and verify each entity's role. Permanently disconnect/retire the old hardware so it cannot resume reporting or rediscover its retired entities later.
+3. Choose **Reuse the retiring entity IDs & history** in the initial selector. Choose **Whole device** and confirm entity mappings, or **Single entity** for one pair. Unmapped entities remain untouched. A removed source can be supplied by its former ID; a removed sensor requires compatible retained statistics as unit evidence.
+4. Click **Review entity ID reuse**. Read the rename/retirement list and the manual-reference report. Existing literal references to the old IDs can continue using them. Device-ID/registry-UUID bindings and references to the replacement's current IDs are reported for manual repair; the report is limited to the normal scan scope and 200 displayed references.
+5. Use **Disable mapped entities** if needed, then **Refresh readiness** until every mapped entity is retired or disabled and unloaded. Unavailable alone is insufficient. No states are forcibly removed and no integrations are automatically reloaded.
+6. Confirm the entity roles, manual-reference report, hardware retirement, removal of mapped old registry entries, and full backup. Select **Assign old entity IDs to replacement**.
+7. After the verified result, enable only the replacement entities (now using the old IDs) through **Settings → Devices & services → Entities**. Complete the reported manual binding/reference repairs and check that readings and retained history are correct.
+
+**Why old entries are removed rather than renamed:** Home Assistant's recorder follows a registry entity-ID rename. Renaming the old entity to `_old` would move its historical series away from the ID you want to preserve. This workflow instead removes only the mapped, disabled retiring registry entries, keeps their recorded data, and assigns their old IDs to the replacements using native registry operations. It does not delete the old device or claim to transfer device identity.
+
+Where both entities already have history, the original old series is retained and any replacement series remains separate under its previous ID; they are **not merged**. Home Assistant may log that it cannot migrate the replacement series because the old ID already has data; this is expected only when verification confirms both original history identities remain intact. Where an old recorder series does not exist, Home Assistant may natively rename the replacement's series to the reused ID. The operation verifies preserved metadata identities, uses recorder barriers for native rename listeners, and never directly writes SQL or copies measurement rows.
+
+Measurement sensors need matching known units/classes when both entries are available, compatible arithmetic statistics, and `state_class: measurement`. Cumulative counters, including the Energy Dashboard's kWh totals, are blocked: reusing a name alone cannot guarantee correct counter continuity. Review the physical role yourself when the old registry entry is already removed and its class/capabilities are no longer available.
+
+An audit is persisted before any registry mutation. Partial failures, cancellation, interruption or unverified history results block further history operations involving those IDs, including after restart. There is no automatic undo or blind retry; recover registry and recorder consistently from the full backup if needed. ID-reuse audits cannot be selected for configuration Restore.

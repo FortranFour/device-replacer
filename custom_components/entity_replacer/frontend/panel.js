@@ -1,4 +1,4 @@
-/* Device Replacer 1.2.3. No external frontend libraries or build step. */
+/* Device Replacer 1.3.0. No external frontend libraries or build step. */
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
@@ -10,6 +10,8 @@ class EntityReplacerPanel extends HTMLElement {
     this._entities = [];
     this._devices = [];
     this._mode = "device";
+    this._strategy = "references";
+    this._reusePreview = null;
     this._sourceDevice = "";
     this._targetDevice = "";
     this._sourceRemoved = false;
@@ -97,9 +99,10 @@ class EntityReplacerPanel extends HTMLElement {
   }
 
   _invalidate() {
+    this._reusePreview = null;
     this._statisticsPreview = null;
     const statistics = this._query("#statistics-section");
-    if (statistics) { statistics.innerHTML = this._renderStatistics(); this._bindStatistics(); }
+    if (statistics) { statistics.innerHTML = this._strategy === "reuse" ? "" : this._renderStatistics(); this._bindStatistics(); }
     this._preview = null;
     this._review = null;
     this._selected.clear();
@@ -111,6 +114,12 @@ class EntityReplacerPanel extends HTMLElement {
   async _scan() {
     if (this._mode === "device" && (!this._mappingPlan || !this._mappingConfirmed)) return;
     this._invalidate();
+    if (this._strategy === "reuse") {
+      await this._run("Reviewing entity ID reuse and retained history…", async () => {
+        this._reusePreview = await this._request("reuse_preview", { mappings: this._reuseMappings() });
+      });
+      return;
+    }
     await this._run("Scanning configuration and dashboards…", async () => {
       const fields = this._mode === "device" ? {
         source_device: this._sourceDevice.trim(), target_device: this._targetDevice.trim(),
@@ -378,7 +387,44 @@ class EntityReplacerPanel extends HTMLElement {
     if (load) load.disabled = this._busy || !/^[a-f0-9]{32}$/.test(this._sourceDevice.trim()) || !/^[a-f0-9]{32}$/.test(this._targetDevice.trim()) || this._sourceDevice.trim() === this._targetDevice.trim();
   }
 
+  _reuseMappings() {
+    return this._mode === "device"
+      ? this._mappings.filter((row) => row.target).map(({ source, target }) => ({ source: source.trim(), target: target.trim() }))
+      : [{ source: this._source.trim(), target: this._target.trim() }];
+  }
+
+  async _reuseAction(action) {
+    if (this._busy || !this._reusePreview) return;
+    const preview = this._reusePreview;
+    if (action === "reuse_apply" && (!preview.ready || !this._query("#reuse-confirm")?.checked)) return;
+    this._reusePreview = null;
+    await this._run(action === "reuse_apply" ? "Reusing retiring entity IDs and verifying retained history…" : "Preparing the selected entities…", async () => {
+      if (action === "reuse_refresh") {
+        this._reusePreview = await this._request("reuse_preview", { mappings: preview.mappings.map(({ source, target }) => ({ source, target })) });
+      } else {
+        const result = await this._request(action, { preview_id: preview.preview_id, confirmed: true });
+        if (action === "reuse_apply") {
+          this._notice = `${result.message} Audit: ${result.job_id}`;
+          this._resetMappings();
+          await this._refreshHistory();
+        } else this._reusePreview = result;
+      }
+    });
+  }
+
+  _renderReuse() {
+    const preview = this._reusePreview;
+    const audits = (this._history || []).filter((item) => item.mode === "id_reuse");
+    return `<section class="card"><h2>Reuse the retiring entity IDs &amp; history</h2><p>The replacement keeps its own hardware/device identity but takes the old entity IDs, such as <code>sensor.room_temperature</code>, and the old entity name when known. Device names are not copied. Existing literal entity-ID references and retained old history stay under those IDs.</p><p>Device-based automations using device IDs or registry UUIDs still need manual review. References already using the replacement’s current IDs need updating separately. This does not merge histories, support cumulative energy counters, or transfer areas and labels.</p>
+      ${preview ? `<ul>${preview.mappings.map((row) => `<li><code>${escapeHtml(row.target)}</code> → <code>${escapeHtml(row.source)}</code>${row.retire_entry ? "; retire the disabled old registry entry" : "; old entry already removed"}</li>`).join("")}</ul><ul>${preview.entities.map((item) => `<li><code>${escapeHtml(item.entity_id)}</code>: ${!item.disabled ? "enabled" : item.loaded ? "disabled; waiting to unload" : "retired or disabled &amp; unloaded"}</li>`).join("")}</ul><p>Retire/disconnect the old hardware permanently. Both sides must be disabled and unloaded. The old entries are removed, never renamed; renaming them would move their history. Existing replacement history is kept separately when an old series already exists.</p>
+      ${preview.manual_references?.length ? `<details><summary>${preview.manual_reference_count} references need manual review (up to 200 shown)</summary>${preview.manual_references.map((item) => `<p><code>${escapeHtml(item.file)}${item.line ? ":" + item.line : ""}</code></p><pre>${escapeHtml(item.snippet)}</pre>`).join("")}<p>Device Replacer will not edit configuration references in this mode.</p></details>` : ""}${(preview.warnings || []).map((note) => `<p class="warning">${escapeHtml(note)}</p>`).join("")}
+      ${preview.can_disable ? `<button id="reuse-disable" ${this._busy ? "disabled" : ""}>Disable mapped entities</button>` : ""}<button id="reuse-refresh" ${this._busy ? "disabled" : ""}>Refresh readiness</button>
+      ${preview.ready ? `<label class="check"><input id="reuse-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> I verified the entity roles and manual-reference report, disconnected the retiring hardware, understand the mapped old registry entries will be removed, and have a full backup including the recorder database. Configuration Restore cannot undo this operation.</label><button id="reuse-apply" class="primary" disabled>Assign old entity IDs to replacement</button>` : "<p>Wait for actual unloading, then refresh readiness. If necessary, reload the relevant integration or restart Home Assistant yourself.</p>"}` : "<p>Choose devices and confirm their entity mappings above, or choose Single entity. Then click Review entity ID reuse.</p>"}
+      ${audits.length ? `<details><summary>Entity ID reuse audit</summary>${audits.map((item) => `<p>${escapeHtml(item.job_id)} · ${escapeHtml(item.status)}</p>`).join("")}<p>Incomplete operations need manual recovery from the full backup; no automatic undo is offered.</p></details>` : ""}</section>`;
+  }
+
   _renderResults() {
+    if (this._strategy === "reuse") return this._renderReuse();
     const preview = this._preview;
     if (!preview) return "";
     let available = 0;
@@ -429,14 +475,14 @@ class EntityReplacerPanel extends HTMLElement {
       .reference { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--divider-color,#e4e8ec); } .reference-body { min-width:0; flex:1; } .manual { display:block; padding:2px 6px; border-radius:5px; font-size:12px; background:rgba(255,170,0,.18); } pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 monospace; background:var(--secondary-background-color,#f4f6f8); border-radius:7px; padding:10px; }
       .diff { border-top:1px solid var(--divider-color,#dce1e7); } .diff pre { max-height:520px; overflow:auto; white-space:pre; } .coverage { margin:20px 0; } li { margin:6px 0; } .empty { padding:20px; } .progress { color:var(--primary-color,#0288d1); margin:12px 0; } .backup-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .backup-row select { flex:1; min-width:230px; } .restore-check { margin-top:16px; }
       @media(max-width:640px) { main { padding:12px; } .fields,.mapping-row { grid-template-columns:1fr; gap:14px; } .card { padding:15px; } header { padding:12px; } .reference { gap:8px; } button { min-height:44px; } .backup-row select { min-width:0; flex-basis:100%; } }
-    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.2.3")}</span></header><main>
-      <section class="bubble"><strong>Replace a device and its entity references</strong><p>Choose the old and new devices, confirm their entity roles, then review and apply selected changes with backups. Single-entity replacement is also available.</p></section>
+    </style><header><button class="menu" id="menu" aria-label="Open sidebar">☰</button><img class="brand-icon" src="/entity_replacer_static/icon.svg" alt=""><strong>Device Replacer</strong><span class="version">${escapeHtml(this._version || "1.3.0")}</span></header><main>
+      <section class="bubble"><strong>Replace a device or entity</strong><p>Choose a replacement strategy, match the entities, then review the changes. Reference edits have configuration backups; reusing old IDs requires a full Home Assistant backup including the recorder database. Single-entity replacement is also available.</p></section>
       ${this._error ? `<div class="error" role="alert">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHtml(this._notice)}</div>` : ""}
-      <section class="card"><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}
-      <details><summary>Additional scan options</summary><label class="check"><input id="text" type="checkbox" ${this._text ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in additional text/code files</label><label class="check"><input id="storage" type="checkbox" ${this._storage ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in other internal storage (manual review)</label><label class="check"><input id="allow-unavailable" type="checkbox" ${this._allowUnavailable ? "checked" : ""} ${this._busy ? "disabled" : ""}> Allow unavailable or disabled replacements</label></details>
-      <div class="actions"><button id="scan" class="primary">Scan references</button><button id="refresh" ${this._busy ? "disabled" : ""}>Refresh device/entity lists</button></div><p class="secondary">YAML formatting and comments are preserved. UI dashboards are saved through Home Assistant. Device blocks are selectable only when their selectors and replacement capabilities can be validated. Unsupported blocks and other storage get manual instructions.</p></section>
-      ${this._busy ? `<p class="progress" role="status" aria-live="polite">${escapeHtml(this._busyMessage)}</p>` : ""}<div id="results">${this._renderResults()}</div><div id="statistics-section">${this._renderStatistics()}</div>
-      <section class="card"><h2>Restore a replacement</h2><p class="secondary">Restore checks every file/dashboard first and refuses to overwrite newer edits. Backups survive Home Assistant restarts.</p>${this._history.some((item) => item.mode !== "statistics") ? `<div class="backup-row"><select id="backup" aria-label="Choose replacement backup" ${this._busy ? "disabled" : ""}>${this._history.filter((item) => item.mode !== "statistics").map((item) => `<option value="${escapeHtml(item.job_id)}">${escapeHtml(item.created)} · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)}</option>`).join("")}</select><button id="restore" ${this._busy ? "disabled" : ""}>Restore selected backup</button></div><label class="check restore-check"><input id="restore-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> Restore the files/dashboard settings changed by this replacement</label>` : '<p>No replacements have been applied yet.</p>'}</section>
+      <section class="card"><label class="field">How should the replacement take over?<select id="strategy" ${this._busy ? "disabled" : ""}><option value="references" ${this._strategy !== "reuse" ? "selected" : ""}>Update references to the new device and entity IDs</option><option value="reuse" ${this._strategy === "reuse" ? "selected" : ""}>Reuse the retiring entity IDs &amp; history</option></select></label><div class="actions mode-buttons" aria-label="Replacement mode"><button data-mode="device" aria-pressed="${this._mode === "device"}" ${this._busy ? "disabled" : ""}>Whole device</button><button data-mode="entity" aria-pressed="${this._mode === "entity"}" ${this._busy ? "disabled" : ""}>Single entity</button></div>${this._renderChooser()}
+      <details ${this._strategy === "reuse" ? "hidden" : ""}><summary>Additional scan options</summary><label class="check"><input id="text" type="checkbox" ${this._text ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in additional text/code files</label><label class="check"><input id="storage" type="checkbox" ${this._storage ? "checked" : ""} ${this._busy ? "disabled" : ""}> Report references in other internal storage (manual review)</label><label class="check"><input id="allow-unavailable" type="checkbox" ${this._allowUnavailable ? "checked" : ""} ${this._busy ? "disabled" : ""}> Allow unavailable or disabled replacements</label></details>
+      <div class="actions"><button id="scan" class="primary">${this._strategy === "reuse" ? "Review entity ID reuse" : "Scan references"}</button><button id="refresh" ${this._busy ? "disabled" : ""}>Refresh device/entity lists</button></div><p class="secondary">${this._strategy === "reuse" ? "ID reuse retires mapped old registry entries. Read the manual-reference report and use a full backup including the recorder database; configuration Restore cannot undo this operation." : "YAML formatting and comments are preserved. UI dashboards are saved through Home Assistant. Device blocks are selectable only when their selectors and replacement capabilities can be validated. Unsupported blocks and other storage get manual instructions."}</p></section>
+      ${this._busy ? `<p class="progress" role="status" aria-live="polite">${escapeHtml(this._busyMessage)}</p>` : ""}<div id="results">${this._renderResults()}</div><div id="statistics-section">${this._strategy === "reuse" ? "" : this._renderStatistics()}</div>
+      <section class="card"><h2>Restore a replacement</h2><p class="secondary">Restore checks every file/dashboard first and refuses to overwrite newer edits. Backups survive Home Assistant restarts.</p>${this._history.some((item) => !["statistics", "id_reuse"].includes(item.mode)) ? `<div class="backup-row"><select id="backup" aria-label="Choose replacement backup" ${this._busy ? "disabled" : ""}>${this._history.filter((item) => !["statistics", "id_reuse"].includes(item.mode)).map((item) => `<option value="${escapeHtml(item.job_id)}">${escapeHtml(item.created)} · ${escapeHtml(item.source)} → ${escapeHtml(item.target)} · ${escapeHtml(item.status)}</option>`).join("")}</select><button id="restore" ${this._busy ? "disabled" : ""}>Restore selected backup</button></div><label class="check restore-check"><input id="restore-confirm" type="checkbox" ${this._busy ? "disabled" : ""}> Restore the files/dashboard settings changed by this replacement</label>` : '<p>No replacements have been applied yet.</p>'}</section>
     </main>`;
     this._bind();
     this._updateControls();
@@ -444,6 +490,11 @@ class EntityReplacerPanel extends HTMLElement {
 
   _bind() {
     const on = (selector, event, handler) => this._query(selector)?.addEventListener(event, handler);
+    on("#strategy", "change", (event) => { this._strategy = event.target.value; this._invalidate(); this._render(); });
+    on("#reuse-disable", "click", () => this._reuseAction("reuse_disable"));
+    on("#reuse-refresh", "click", () => this._reuseAction("reuse_refresh"));
+    on("#reuse-confirm", "change", (event) => { this._query("#reuse-apply").disabled = this._busy || !event.target.checked; });
+    on("#reuse-apply", "click", () => this._reuseAction("reuse_apply"));
     on("#menu", "click", () => this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true })));
     for (const button of this.shadowRoot.querySelectorAll("[data-mode]")) {
       button.addEventListener("click", () => {
